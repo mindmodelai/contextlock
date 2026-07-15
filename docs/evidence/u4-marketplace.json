@@ -1,0 +1,12 @@
+{
+  "name": "contextlock-surface",
+  "owner": { "name": "ContextLock Surface Test" },
+  "plugins": [
+    {
+      "name": "cachecanary",
+      "source": "./plugins/cachecanary",
+      "description": "Cache re-validation canary plugin for ContextLock surface tests",
+      "version": "1.0.0"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node C:/Users/user/AppData/Local/Temp/claude/C--projects/9e822f2f-9ce0-4e0d-93d0-d68b42725ecf/scratchpad/surface-tests/hooks/u1_hook.js",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,24 @@
+--- spawned; sending turn 1 ---
+EVENT type=system subtype=init
+EVENT type=system subtype=thinking_tokens
+EVENT type=system subtype=thinking_tokens
+EVENT type=system subtype=thinking_tokens
+EVENT type=rate_limit_event
+EVENT type=system subtype=thinking_tokens
+EVENT type=assistant
+EVENT type=assistant
+EVENT type=result subtype=success
+=> result #1 result_text="READY"
+--- edited settings.json to add UserPromptSubmit hook ---
+--- sent turn 2 ---
+EVENT type=system subtype=init
+EVENT type=system subtype=thinking_tokens
+EVENT type=system subtype=thinking_tokens
+EVENT type=system subtype=thinking_tokens
+EVENT type=system subtype=thinking_tokens
+EVENT type=assistant
+EVENT type=assistant
+EVENT type=result subtype=success
+=> result #2 result_text="OK"
+--- child closed code=0 ---
+--- global timeout, killing ---

@@ -1,0 +1,5 @@
+{
+  "name": "cachecanary",
+  "description": "Cache re-validation canary plugin for ContextLock surface tests",
+  "version": "1.0.0"
+}

@@ -224,12 +224,12 @@ Confirmed:
 - **Nested CLAUDE.md files load lazily** (when the agent reads files in that directory) with no before-load hook.
 - The `FileChanged` hook event exists (informational) and can drive seal-state invalidation.
 
-Unverified (each has an empirical test in 7.4):
+Resolved empirically on 2026-07-14 against Claude Code 2.1.210 (full method and evidence: `docs/claude-code-surface.md`). These are undocumented behaviors and must be re-tested per release:
 
-- U1: ordering of `SessionStart` hooks vs CLAUDE.md context injection.
-- U2: whether SKILL.md body reads at invocation time route through the `Read` tool (and are thus PreToolUse-interceptable) or are harness-internal.
-- U3: whether hook definitions are snapshotted at session start (mid-session settings edits inert or live).
-- U4: whether plugin cache content (`~/.claude/plugins/cache/`) is re-validated against its source on load or trusted once installed.
+- U1 **resolved, favorable**: the `SessionStart` hook runs *before* the root project CLAUDE.md is ingested into context (confirmed on cold start and resume). A sweep that quarantines a tampered CLAUDE.md therefore protects the *current* session, not just the next one. Nested, lazily loaded CLAUDE.md files remain uncovered by the sweep at load time.
+- U2 **resolved, split**: SKILL.md body loading is harness-internal to the `Skill` tool - no `Read` tool event fires, so `PreToolUse(Read)` cannot see skill bodies. However, a `PreToolUse` hook with matcher `Skill` hard-denies the invocation (confirmed). Skill enforcement lives on the `Skill` matcher, not the `Read` matcher.
+- U3 **resolved**: hook definitions are snapshotted at process start; mid-session edits to settings.json are inert until restart. (Security upside: a mid-session attacker cannot un-register verification hooks without a restart. Operational note: ContextLock config changes need a session restart.)
+- U4 **resolved, with a scope caveat**: installed plugin cache content is never re-validated - and for *local-source* marketplaces the cache is bypassed entirely: content is served live from the source directory. Write-deny and sweep coverage must therefore include marketplace source directories, not just `~/.claude/plugins/cache/**`. The git/remote-source marketplace path (where the cache is the load path) was not tested and remains open.
 
 ### 7.2 The four enforcement layers
 
@@ -237,14 +237,14 @@ Unverified (each has an empirical test in 7.4):
 Verification where ContextLock controls the moment: `contextlock install <source>` verifies packages before placing files into skill/plugin directories; `seal` pins files at review time. For CLAUDE.md - which has no load hook - write-time is the *primary* control: seal it, then deny unauthorized writes (Layer 3). TOCTOU note: verify-at-install plus write-deny closes the gap that verify-at-load alone leaves open.
 
 **Layer 2 - Session-start sweep.**
-A `SessionStart` hook runs `contextlock sweep`: verify every protected-class file reachable from the workspace and the user scope. Failures quarantine the file (move aside + placeholder) where policy allows, and always inject a status report via `additionalContext` so the model and user both see it. If U1 resolves to "hook runs after CLAUDE.md ingestion", the sweep still catches tampering for every *subsequent* session, and quarantine removes the file before the next one; the spec does not pretend this is load-time interception.
+A `SessionStart` hook runs `contextlock sweep`: verify every protected-class file reachable from the workspace and the user scope. Failures quarantine the file (move aside + placeholder) where policy allows, and always inject a status report via `additionalContext` so the model and user both see it. Confirmed on Claude Code 2.1.210 (U1): the hook runs before the root CLAUDE.md is ingested, so sweep-plus-quarantine is effective for the current session for root instruction files. This ordering is undocumented, so the plugin treats it as an optimization, not a guarantee: write-time sealing (Layer 1) remains the primary CLAUDE.md control, and nested lazily loaded CLAUDE.md files are covered only by seal plus write-deny.
 
 **Layer 3 - Read/invoke/write-time denial.**
 `PreToolUse` hooks (shipped in the plugin's `hooks/hooks.json`):
 
-- matcher `Skill`: deny invocation when the skill's files fail verification (confirmed blockable),
-- matcher `Read`: deny reads of protected-class files in `modified`/`revoked` state (fully effective only if U2 confirms; otherwise still covers explicit reads),
-- matcher `Edit|Write`: deny writes to sealed files and to ContextLock's own state (`~/.contextlock/**`), turning T2 persistence attempts into visible permission denials.
+- matcher `Skill`: deny invocation when the skill's files fail verification. This is the *only* interception point for skill content: SKILL.md bodies load harness-internally and never surface as `Read` events (U2),
+- matcher `Read`: deny explicit reads of protected-class files in `modified`/`revoked` state (does not cover skill bodies, per U2),
+- matcher `Edit|Write`: deny writes to sealed files, to ContextLock's own state (`~/.contextlock/**`), and to plugin marketplace source directories (U4: local-source marketplaces serve content live from source, bypassing the cache), turning T2 persistence attempts into visible permission denials.
 - `FileChanged`: mark seal state dirty for re-verification.
 
 **Layer 4 - Managed policy (teams and enterprises).**
@@ -266,14 +266,11 @@ contextlock-plugin/
 
 Bootstrap honesty: the plugin verifies content, but the plugin itself is distributed through the unverified channel it exists to fix. Interim answer: publish signed release artifacts + a one-line install verifier script, pin the marketplace entry to commit SHAs, and document the residual risk. Long-term answer: section 14 (upstream signed plugins).
 
-### 7.4 Empirical test plan (resolves U1-U4)
+### 7.4 Empirical results (U1-U4)
 
-1. **U1:** register a SessionStart hook that writes a timestamp; place a canary line in CLAUDE.md; inspect transcript/context ordering across cold start and `--resume`.
-2. **U2:** register a PreToolUse(Read) hook logging `file_path`; invoke a skill; check whether SKILL.md and bundled files appear.
-3. **U3:** mid-session, append a new hook to `.claude/settings.json`; trigger its event; observe whether it fires without restart.
-4. **U4:** hand-edit a cached plugin file under `~/.claude/plugins/cache/`; restart; observe whether the edit survives into the session.
+The test plan was executed on 2026-07-14 against Claude Code 2.1.210 on Windows 11; verdicts are folded into 7.1 and 7.2 above. Full method, commands, fixtures, and trimmed transcripts: `docs/claude-code-surface.md` and `docs/evidence/`. Because none of these behaviors is documented, the surface doc is version-stamped and the tests are designed to be re-run per Claude Code release (they cost roughly a dozen haiku-priced headless invocations).
 
-Results gate the final wording of 7.2 and get recorded in `docs/claude-code-surface.md` with the Claude Code version tested.
+Remaining open experiment: cache re-validation for git/remote-source marketplaces, where the cache *is* the load path (needs a hosted test repo; U4 only covered local-source marketplaces).
 
 ## 8. Self-protection: the trust store is also a mutable file
 
@@ -384,8 +381,8 @@ Integrity-extension proposal to the agentskills.io spec; interop tests against n
 
 Carried forward, now with owners in the process rather than rhetorical status:
 
-1. U1-U4 (section 7.4) - empirical, Phase A.
-2. Keep or rename (section 12) - decision, before any public artifact.
+1. ~~U1-U4~~ Resolved 2026-07-14 (section 7.4, `docs/claude-code-surface.md`). Follow-up: remote-source marketplace cache behavior; re-run the surface tests per Claude Code release.
+2. ~~Keep or rename~~ Resolved: keep (section 12); trademark search still outstanding.
 3. Sign in-toto Statements (nono-compatible) vs bare manifest payload in DSSE - leaning Statement-with-ContextLock-predicate for ecosystem reuse; decide in Phase B design.
 4. Quarantine UX: move-aside + placeholder vs rename-in-place - Phase A usability test.
 5. Seal-store scaling (JSON vs SQLite) once seals exceed ~10^3 files - defer until real.
