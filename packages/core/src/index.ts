@@ -90,6 +90,26 @@ export type {
   SigstoreVerification,
 } from "./sigstore.js";
 
+// in-toto Statement read-compat (Phase D: nono interop)
+export {
+  parseStatement,
+  statementFileEntries,
+  statementSubjectNameError,
+  verifyNonoBundle,
+  IN_TOTO_PAYLOAD_TYPE,
+  IN_TOTO_STATEMENT_TYPE,
+  NONO_PREDICATE_SINGLE,
+  NONO_PREDICATE_MULTI,
+  NONO_MULTI_BUNDLE_FILENAME,
+  REDUCED_GUARANTEE_WARNING,
+} from "./intoto.js";
+export type {
+  InTotoStatement,
+  StatementSubject,
+  StatementFileEntry,
+  NonoVerification,
+} from "./intoto.js";
+
 // Root of trust + rotation (SPEC v2 6.5)
 export {
   validateRoot,

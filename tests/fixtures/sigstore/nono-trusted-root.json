@@ -1,0 +1,62 @@
+{
+  "mediaType": "application/vnd.dev.sigstore.trustedroot+json",
+  "tlogs": [],
+  "certificateAuthorities": [
+    {
+      "subject": {
+        "organization": "sigstore.mock",
+        "commonName": "sigstore"
+      },
+      "uri": "https://fulcio.sigstore.mock",
+      "certChain": {
+        "certificates": [
+          {
+            "rawBytes": "MIIBqDCCAU6gAwIBAgIBATAKBggqhkjOPQQDAzArMREwDwYDVQQDEwhzaWdzdG9yZTEWMBQGA1UEChMNc2lnc3RvcmUubW9jazAeFw0yNjA3MTUyMjQ4MThaFw0yNzA3MTUyMjQ4MThaMCsxETAPBgNVBAMTCHNpZ3N0b3JlMRYwFAYDVQQKEw1zaWdzdG9yZS5tb2NrMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEO+rPDMRSdNAZwAeYVRrUAA7tvNZkuAQsCK6RuXi+tJhzR0+Oxzbz58CgLL3yiCfOCt7nq66GmkRhPmCWKNaCxKNjMGEwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ8BAf8EBAMCAQYwHQYDVR0OBBYEFATFdtpZ+roTtWUcpUnLbpL3HuF6MB8GA1UdIwQYMBaAFATFdtpZ+roTtWUcpUnLbpL3HuF6MAoGCCqGSM49BAMDA0gAMEUCIQCnp83t+hEV1Xfz3V/EiZAlF9jhJR2zt+x42sSthILkFAIgH3Mp62LXMTp497IViCulTXuiPa3pOO6HwPUY+mCUJdk="
+          }
+        ]
+      },
+      "validFor": {
+        "start": "2026-07-14T22:48:18.450Z",
+        "end": "2036-07-12T22:48:18.450Z"
+      }
+    }
+  ],
+  "ctlogs": [
+    {
+      "baseUrl": "https://ctlog.sigstore.mock",
+      "hashAlgorithm": "SHA2_256",
+      "publicKey": {
+        "rawBytes": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE73W9lLP6zyqWndTv2I64iKkKCiSiBDAorw8jJ1u8v39rQ5yxw2uz+9GhUOC/lEiOEWX2yndjF7RjBDWzSUZBMQ==",
+        "keyDetails": "PKIX_ECDSA_P256_SHA_256",
+        "validFor": {
+          "start": "2026-07-14T22:48:18.450Z"
+        }
+      },
+      "logId": {
+        "keyId": "pLZrL9ESbBVrVfqhi2fUO9mw8EsKWk9OPaV7xRYaPK4="
+      }
+    }
+  ],
+  "timestampAuthorities": [
+    {
+      "subject": {
+        "organization": "sigstore.mock",
+        "commonName": "tsa"
+      },
+      "certChain": {
+        "certificates": [
+          {
+            "rawBytes": "MIIBvDCCAWGgAwIBAgIBAjAKBggqhkjOPQQDAzAmMQwwCgYDVQQDEwN0c2ExFjAUBgNVBAoTDXNpZ3N0b3JlLm1vY2swHhcNMjYwNzE1MjI0ODE4WhcNMjcwNzE1MjI0ODE4WjAuMRQwEgYDVQQDEwt0c2Egc2lnbmluZzEWMBQGA1UEChMNc2lnc3RvcmUubW9jazBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABMrDJ0Pr+w6e39c8uu9R0Ih8cxg8SxKTrrscBLsaJj+vXe9JxPQhVg+m6ZNFs92xh4IPiyWYBcG0fE+Q8EM5oLWjeDB2MAwGA1UdEwEB/wQCMAAwDgYDVR0PAQH/BAQDAgeAMBYGA1UdJQEB/wQMMAoGCCsGAQUFBwMIMB0GA1UdDgQWBBRtJFJxDAlIt8emWiSJBM3t8jTeNDAfBgNVHSMEGDAWgBRtJFJxDAlIt8emWiSJBM3t8jTeNDAKBggqhkjOPQQDAwNJADBGAiEAor6YWelQIlZwmaaGIt6p2DgHd6SlFMmKZhEif1fNwlQCIQDdbOfcDRazjiCn2Aw+9iVxabX8F1AU30nhr7YWj/cnyg=="
+          },
+          {
+            "rawBytes": "MIIBnjCCAUSgAwIBAgIBATAKBggqhkjOPQQDAzAmMQwwCgYDVQQDEwN0c2ExFjAUBgNVBAoTDXNpZ3N0b3JlLm1vY2swHhcNMjYwNzE1MjI0ODE4WhcNMjcwNzE1MjI0ODE4WjAmMQwwCgYDVQQDEwN0c2ExFjAUBgNVBAoTDXNpZ3N0b3JlLm1vY2swWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATKwydD6/sOnt/XPLrvUdCIfHMYPEsSk667HAS7GiY/r13vScT0IVYPpumTRbPdsYeCD4slmAXBtHxPkPBDOaC1o2MwYTAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAdBgNVHQ4EFgQUbSRScQwJSLfHplokiQTN7fI03jQwHwYDVR0jBBgwFoAUbSRScQwJSLfHplokiQTN7fI03jQwCgYIKoZIzj0EAwMDSAAwRQIgQFKAtxN4Sgp5oSaDUdwTnAv5RASB9psjx1MdJoeCtOQCIQDGh8kkqBcTYI2e3Av8o1A/TWgEzou9cmgFfD2R+p9JHQ=="
+          }
+        ]
+      },
+      "validFor": {
+        "start": "2026-07-14T22:48:18.450Z",
+        "end": "2036-07-12T22:48:18.450Z"
+      }
+    }
+  ]
+}
