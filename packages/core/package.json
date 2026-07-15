@@ -1,0 +1,22 @@
+{
+  "name": "@contextlock/core",
+  "version": "0.0.1",
+  "description": "Core verification engine for ContextLock TCV",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest --run"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^2.3.0",
+    "@noble/hashes": "^1.7.2",
+    "minimatch": "^10.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "fast-check": "^4.1.1",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.1"
+  }
+}

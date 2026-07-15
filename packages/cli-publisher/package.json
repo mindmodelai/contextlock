@@ -1,0 +1,25 @@
+{
+  "name": "@contextlock/cli-publisher",
+  "version": "0.0.1",
+  "description": "Publisher CLI for ContextLock TCV",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "tcv-publisher": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest --run"
+  },
+  "dependencies": {
+    "@contextlock/core": "workspace:*",
+    "@noble/ed25519": "^2.3.0",
+    "@noble/hashes": "^1.7.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0",
+    "vitest": "^3.2.1",
+    "fast-check": "^4.1.1"
+  }
+}
