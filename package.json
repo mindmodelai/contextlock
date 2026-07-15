@@ -19,11 +19,16 @@
   "devDependencies": {
     "typescript": "^5.7.0",
     "vitest": "^3.2.1",
-    "fast-check": "^4.1.1"
+    "fast-check": "^4.1.1",
+    "@types/node": "^22.0.0",
+    "@sigstore/mock": "^0.13.0"
   },
   "dependencies": {
     "@noble/ed25519": "^2.3.0",
     "@noble/hashes": "^1.7.2",
-    "minimatch": "^10.0.1"
+    "minimatch": "^10.0.1",
+    "@sigstore/bundle": "^4.0.0",
+    "@sigstore/verify": "^3.1.1",
+    "@sigstore/protobuf-specs": "^0.5.1"
   }
 }

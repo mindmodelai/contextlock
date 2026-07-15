@@ -71,7 +71,24 @@ export type {
   CandidateKey,
   EnvelopeVerification,
   EnvelopeSigner,
+  VerifiedSigner,
 } from "./dsse.js";
+
+// Sigstore keyless verification (Mode 2, Profile B - SPEC v2 5)
+export {
+  verifySigstoreBundle,
+  matchTrustedIdentity,
+  signerFingerprint,
+  defaultTrustedRootPath,
+  SIGSTORE_BUNDLE_FILENAME,
+  MAX_BUNDLE_BYTES,
+} from "./sigstore.js";
+export type {
+  TrustedIdentity,
+  SigstoreVerifyOptions,
+  SigstoreThresholds,
+  SigstoreVerification,
+} from "./sigstore.js";
 
 // Root of trust + rotation (SPEC v2 6.5)
 export {

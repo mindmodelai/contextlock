@@ -71,6 +71,14 @@ export interface CandidateKey {
   revoked: boolean;
 }
 
+/** A trusted key that produced a valid signature over the envelope. */
+export interface VerifiedSigner {
+  keyId: string;
+  /** SHA-256 hex fingerprint of the verifying public key (anti-rollback keying). */
+  keyFingerprint: string;
+  publisher: string;
+}
+
 export interface EnvelopeVerification {
   valid: boolean;
   reason?: string;
@@ -79,6 +87,12 @@ export interface EnvelopeVerification {
   /** SHA-256 hex fingerprint of the verifying public key (anti-rollback keying). */
   keyFingerprint?: string;
   publisher?: string;
+  /**
+   * EVERY distinct non-revoked trusted key that verified a signature
+   * (reviewer multi-signatures, SPEC v2 6.2). The primary signer above is
+   * signers[0].
+   */
+  signers?: VerifiedSigner[];
   /** Decoded payload bytes of the VERIFIED envelope. Only set when valid. */
   payload?: Buffer;
 }
@@ -255,6 +269,11 @@ export async function envelopeVerifiesWithKey(
  * never excludes a key. Non-revoked candidates are tried before revoked ones
  * so that a signature by a revoked key is reported as "key revoked" rather
  * than "unknown signing key" (the more actionable verdict).
+ *
+ * ALL matching non-revoked keys are collected into `signers` (distinct by
+ * fingerprint) so callers can enforce reviewer multi-signature thresholds.
+ * A key that verifies but is revoked never counts toward the threshold; the
+ * verdict is only "key revoked" when NO valid key verifies.
  */
 export async function verifyEnvelope(
   envelope: DsseEnvelope,
@@ -279,26 +298,47 @@ export async function verifyEnvelope(
     return ah - bh;
   });
 
+  const signers: VerifiedSigner[] = [];
+  let revokedSigner: VerifiedSigner | undefined;
+  const seenFingerprints = new Set<string>();
+
   for (const candidate of ordered) {
+    const keyFingerprint = sha256(Buffer.from(candidate.publicKey));
+    if (seenFingerprints.has(keyFingerprint)) continue;
     if (await envelopeVerifiesWithKey(envelope, candidate.publicKey)) {
-      const keyFingerprint = sha256(Buffer.from(candidate.publicKey));
-      if (candidate.revoked) {
-        return {
-          valid: false,
-          reason: "key revoked",
-          keyId: candidate.keyid,
-          keyFingerprint,
-          publisher: candidate.publisher,
-        };
-      }
-      return {
-        valid: true,
+      seenFingerprints.add(keyFingerprint);
+      const signer: VerifiedSigner = {
         keyId: candidate.keyid,
         keyFingerprint,
         publisher: candidate.publisher,
-        payload: b64Decode(envelope.payload),
       };
+      if (candidate.revoked) {
+        revokedSigner = revokedSigner ?? signer;
+      } else {
+        signers.push(signer);
+      }
     }
+  }
+
+  if (signers.length > 0) {
+    return {
+      valid: true,
+      keyId: signers[0].keyId,
+      keyFingerprint: signers[0].keyFingerprint,
+      publisher: signers[0].publisher,
+      signers,
+      payload: b64Decode(envelope.payload),
+    };
+  }
+
+  if (revokedSigner) {
+    return {
+      valid: false,
+      reason: "key revoked",
+      keyId: revokedSigner.keyId,
+      keyFingerprint: revokedSigner.keyFingerprint,
+      publisher: revokedSigner.publisher,
+    };
   }
 
   return {

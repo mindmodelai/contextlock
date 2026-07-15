@@ -8,6 +8,7 @@ import type { CandidateKey } from "./dsse.js";
 import { b64Decode } from "./dsse.js";
 import type { RootFile } from "./root.js";
 import { rootExpired } from "./root.js";
+import type { TrustedIdentity } from "./sigstore.js";
 
 // ---- Interfaces ----
 
@@ -35,7 +36,9 @@ export interface TrustStoreData {
   trusted_publishers: TrustedPublisher[];
   /** Pinned publisher roots (SPEC v2 6.5), keyed by publisher name. */
   roots?: Record<string, RootFile>;
-  /** Machine-local signature over canonicalJson({schema, roots, trusted_publishers}). */
+  /** Pinned keyless identities (SPEC v2 5, Profile B). */
+  trusted_identities?: TrustedIdentity[];
+  /** Machine-local signature over the canonicalJson of the data fields. */
   sig?: { key_fingerprint: string; signature: string };
 }
 
@@ -47,6 +50,7 @@ const warnedLegacyPaths = new Set<string>();
 export class TrustStore {
   private publishers: TrustedPublisher[] = [];
   private roots: Record<string, RootFile> = {};
+  private identities: TrustedIdentity[] = [];
 
   /**
    * Loads trust store data from a JSON file (SPEC v2 8: signed local state).
@@ -87,13 +91,24 @@ export class TrustStore {
       data.roots != null && typeof data.roots === "object" && !Array.isArray(data.roots)
         ? data.roots
         : {};
+    const identities = Array.isArray(data.trusted_identities) ? data.trusted_identities : [];
 
     if (data.sig && typeof data.sig.signature === "string") {
-      // Legacy stores were signed over {schema, trusted_publishers}; v2 stores
-      // over {schema, roots, trusted_publishers} (keys sorted by canonicalJson).
+      // The signed payload mirrors the fields actually present in the file so
+      // stores written by earlier versions keep verifying:
+      //   tcv-truststore/v1:            {schema, trusted_publishers}
+      //   contextlock-truststore/2:     {schema, roots, trusted_publishers}
+      //   + Profile B identities:       {schema, roots, trusted_identities, trusted_publishers}
       const payload = isLegacy
         ? canonicalJson({ schema: LEGACY_TRUST_STORE_SPEC, trusted_publishers: publishers })
-        : canonicalJson({ schema: TRUST_STORE_SPEC, roots, trusted_publishers: publishers });
+        : data.trusted_identities !== undefined
+          ? canonicalJson({
+              schema: TRUST_STORE_SPEC,
+              roots,
+              trusted_identities: identities,
+              trusted_publishers: publishers,
+            })
+          : canonicalJson({ schema: TRUST_STORE_SPEC, roots, trusted_publishers: publishers });
       const { valid } = await verifyWithLocalKey(
         Buffer.from(payload, "utf-8"),
         data.sig.signature,
@@ -112,6 +127,7 @@ export class TrustStore {
 
     this.publishers = publishers;
     this.roots = roots;
+    this.identities = identities;
   }
 
   /**
@@ -122,6 +138,7 @@ export class TrustStore {
     const base = {
       schema: TRUST_STORE_SPEC,
       roots: this.roots,
+      trusted_identities: this.identities,
       trusted_publishers: this.publishers,
     };
     const canonical = canonicalJson(base);
@@ -202,6 +219,35 @@ export class TrustStore {
 
   listRoots(): Array<{ publisher: string; root: RootFile }> {
     return Object.entries(this.roots).map(([publisher, root]) => ({ publisher, root }));
+  }
+
+  // ---- Keyless identities (SPEC v2 5, Profile B) ----
+
+  /** Pins a keyless identity. Duplicate (identity, issuer) pairs are replaced. */
+  addIdentity(entry: TrustedIdentity): void {
+    this.identities = this.identities.filter(
+      (i) => !(i.identity === entry.identity && i.issuer === entry.issuer),
+    );
+    this.identities.push(entry);
+  }
+
+  /**
+   * Removes pinned identities. With only a publisher, removes all of that
+   * publisher's identities; with an identity pattern, removes that exact pin.
+   * Returns the number removed.
+   */
+  removeIdentity(publisher: string, identity?: string): number {
+    const before = this.identities.length;
+    this.identities = this.identities.filter((i) => {
+      if (i.publisher !== publisher) return true;
+      if (identity !== undefined && i.identity !== identity) return true;
+      return false;
+    });
+    return before - this.identities.length;
+  }
+
+  listIdentities(): TrustedIdentity[] {
+    return [...this.identities];
   }
 
   /**

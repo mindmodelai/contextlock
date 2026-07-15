@@ -36,6 +36,11 @@ import {
   verifyEnvelope,
 } from "./dsse.js";
 import type { DsseEnvelope, EnvelopeVerification } from "./dsse.js";
+import {
+  SIGSTORE_BUNDLE_FILENAME,
+  verifySigstoreBundle,
+} from "./sigstore.js";
+import type { SigstoreVerifyOptions } from "./sigstore.js";
 import { TrustStore } from "./trust-store.js";
 import { sha256 } from "./hash.js";
 import { canonicalize } from "./canonicalize.js";
@@ -70,6 +75,12 @@ export interface VerificationResult {
   warning?: string;
   /** Seal timestamp when the verdict rests on a local seal. */
   sealedAt?: string;
+  /** Number of distinct trusted keys that signed (reviewer multi-signatures). */
+  signerCount?: number;
+  /** Profile B: the signer's certificate identity (SAN). */
+  identity?: string;
+  /** Profile B: the signer's OIDC issuer. */
+  issuer?: string;
 }
 
 export interface VerificationEngineConfig {
@@ -88,6 +99,14 @@ export interface VerificationEngineConfig {
    * it, else the file's own directory (no walk-up).
    */
   workspaceRoot?: string;
+  /**
+   * Minimum number of DISTINCT trusted keys whose signatures must verify
+   * (reviewer multi-signatures). Default 1. Values > 1 cannot be satisfied by
+   * a Profile B bundle (single certificate).
+   */
+  requiredSigners?: number;
+  /** Profile B (Sigstore) verification options: pinned root path, thresholds. */
+  sigstore?: SigstoreVerifyOptions;
 }
 
 /** Result of verifying a whole package directory (used by `contextlock install`). */
@@ -137,11 +156,29 @@ function resolveBoundary(fileDir: string, configured?: string): string {
   return resolve(fileDir);
 }
 
+/** The two Profile evidence artifacts. Profile A shadows Profile B in a dir. */
+type EvidenceKind = "dsse" | "sigstore";
+
+interface Evidence {
+  dir: string;
+  kind: EvidenceKind;
+  path: string;
+}
+
+function evidenceIn(dir: string): Evidence | undefined {
+  const dssePath = join(dir, ENVELOPE_FILENAME);
+  if (existsSync(dssePath)) return { dir, kind: "dsse", path: dssePath };
+  const bundlePath = join(dir, SIGSTORE_BUNDLE_FILENAME);
+  if (existsSync(bundlePath)) return { dir, kind: "sigstore", path: bundlePath };
+  return undefined;
+}
+
 /**
- * Walk up from `startDir` looking for contextlock.dsse.json, stopping at the
- * boundary (inclusive). First envelope found wins (deeper shadows shallower).
+ * Walk up from `startDir` looking for contextlock.dsse.json (Profile A) or
+ * contextlock.sigstore.json (Profile B), stopping at the boundary
+ * (inclusive). First evidence found wins (deeper shadows shallower).
  */
-function locateEnvelopeDir(startDir: string, boundary: string): string | undefined {
+function locateEvidence(startDir: string, boundary: string): Evidence | undefined {
   let current = resolve(startDir);
   const stop = resolve(boundary);
 
@@ -151,11 +188,12 @@ function locateEnvelopeDir(startDir: string, boundary: string): string | undefin
   const underBoundary =
     relToBoundary === "" || (!relToBoundary.startsWith("..") && !isAbsolute(relToBoundary));
   if (!underBoundary) {
-    return existsSync(join(current, ENVELOPE_FILENAME)) ? current : undefined;
+    return evidenceIn(current);
   }
 
   while (true) {
-    if (existsSync(join(current, ENVELOPE_FILENAME))) return current;
+    const found = evidenceIn(current);
+    if (found) return found;
     if (current === stop) break;
     const parent = dirname(current);
     if (parent === current) break;
@@ -330,10 +368,132 @@ export class VerificationEngine {
       };
     }
 
-    // 5. Verify-then-parse: the manifest is the verified payload's bytes.
+    // 5. Reviewer multi-signature threshold (distinct trusted keys).
+    const signers = verification.signers ?? [];
+    const requiredSigners = this.config.requiredSigners ?? 1;
+    if (signers.length < requiredSigners) {
+      return {
+        result: {
+          status: "untrusted",
+          keyId: verification.keyId,
+          publisher: verification.publisher,
+          signerCount: signers.length,
+          reason: `insufficient signatures: ${signers.length} distinct trusted key(s) verified, ${requiredSigners} required`,
+        },
+      };
+    }
+
+    const outcome = await this.evaluateManifestPayload({
+      payload: verification.payload!,
+      source: envelopePath,
+      publisher: verification.publisher,
+      keyId: verification.keyId,
+      signerFingerprints: signers.map((s) => s.keyFingerprint),
+      signerCount: signers.length,
+      trustStore,
+    });
+    return { ...outcome, verification };
+  }
+
+  /**
+   * Verifies a Profile B Sigstore bundle (keyless): full Sigstore
+   * verification against the pinned trusted root, identity-pin policy, then
+   * the same manifest checks as Profile A (schema, anti-rollback, expiry).
+   */
+  async verifySigstoreFile(
+    bundlePath: string,
+  ): Promise<{ result: VerificationResult; manifest?: Manifest }> {
+    let bundleContent: Buffer;
+    try {
+      bundleContent = await readFile(bundlePath);
+    } catch {
+      return { result: { status: "error", reason: `cannot read bundle: ${bundlePath}` } };
+    }
+
+    const trustStore = new TrustStore();
+    try {
+      await trustStore.load(this.config.trustStorePath);
+    } catch (e) {
+      return {
+        result: { status: "error", reason: `cannot load trust store: ${(e as Error).message}` },
+      };
+    }
+
+    const verification = await verifySigstoreBundle(
+      bundleContent,
+      trustStore.listIdentities(),
+      this.config.sigstore,
+    );
+    if (!verification.valid) {
+      return {
+        result: {
+          status: "untrusted",
+          identity: verification.identity,
+          issuer: verification.issuer,
+          reason: verification.reason ?? "Sigstore verification failed",
+        },
+      };
+    }
+
+    // The payloadType is covered by the DSSE signature inside the bundle.
+    if (verification.payloadType !== MANIFEST_PAYLOAD_TYPE) {
+      return {
+        result: {
+          status: "error",
+          reason: `unexpected payloadType "${verification.payloadType}" (expected "${MANIFEST_PAYLOAD_TYPE}")`,
+        },
+      };
+    }
+
+    // A bundle carries exactly one signing identity; a multi-signer
+    // requirement cannot be met by Profile B alone.
+    const requiredSigners = this.config.requiredSigners ?? 1;
+    if (requiredSigners > 1) {
+      return {
+        result: {
+          status: "untrusted",
+          identity: verification.identity,
+          issuer: verification.issuer,
+          signerCount: 1,
+          reason: `insufficient signatures: a Sigstore bundle carries 1 signer, ${requiredSigners} required`,
+        },
+      };
+    }
+
+    const outcome = await this.evaluateManifestPayload({
+      payload: verification.payload!,
+      source: bundlePath,
+      publisher: verification.publisher,
+      keyId: verification.identity,
+      signerFingerprints: [verification.signerFingerprint!],
+      signerCount: 1,
+      trustStore,
+    });
+    if (outcome.result.status === "trusted" || outcome.result.status === "expired") {
+      outcome.result.identity = verification.identity;
+      outcome.result.issuer = verification.issuer;
+    }
+    return outcome;
+  }
+
+  /**
+   * Shared post-signature manifest evaluation (verify-then-parse bytes in):
+   * schema validation, anti-rollback across every verified signer, expiry,
+   * and lint-attestation warnings.
+   */
+  private async evaluateManifestPayload(opts: {
+    payload: Buffer;
+    source: string;
+    publisher?: string;
+    keyId?: string;
+    signerFingerprints: string[];
+    signerCount: number;
+    trustStore: TrustStore;
+  }): Promise<{ result: VerificationResult; manifest?: Manifest }> {
+    // Verify-then-parse: the manifest is the verified payload's bytes.
     let manifest: Manifest;
     try {
-      manifest = parseManifest(verification.payload!);
+      manifest = parseManifest(opts.payload);
     } catch (e) {
       return { result: { status: "error", reason: `invalid manifest: ${(e as Error).message}` } };
     }
@@ -348,7 +508,9 @@ export class VerificationEngine {
       };
     }
 
-    // 6. Anti-rollback (T7). A corrupt/tampered state store fails CLOSED.
+    // Anti-rollback (T7). A corrupt/tampered state store fails CLOSED. The
+    // baseline is checked and recorded against EVERY verified signer so a
+    // rollback is caught regardless of which signature the attacker replays.
     const state = new RollbackState(this.config.stateStorePath);
     await state.load();
     if (!state.available) {
@@ -359,72 +521,72 @@ export class VerificationEngine {
         },
       };
     }
-    const rollbackCheck = state.check(
-      manifest.package,
-      verification.keyFingerprint!,
-      manifest.version,
-    );
-    if (!rollbackCheck.ok) {
-      return {
-        result: {
-          status: "rollback",
-          keyId: verification.keyId,
-          publisher: verification.publisher,
-          reason:
-            `manifest version ${manifest.version} is older than the highest ` +
-            `version already seen (${rollbackCheck.highestSeen}) for package ` +
-            `"${manifest.package}" - possible rollback attack (T7)`,
-        },
-      };
+    for (const fingerprint of opts.signerFingerprints) {
+      const rollbackCheck = state.check(manifest.package, fingerprint, manifest.version);
+      if (!rollbackCheck.ok) {
+        return {
+          result: {
+            status: "rollback",
+            keyId: opts.keyId,
+            publisher: opts.publisher,
+            reason:
+              `manifest version ${manifest.version} is older than the highest ` +
+              `version already seen (${rollbackCheck.highestSeen}) for package ` +
+              `"${manifest.package}" - possible rollback attack (T7)`,
+          },
+        };
+      }
     }
     // Raise the baseline: the manifest itself verified, so this version has
     // been "seen" regardless of the per-file verdicts that may follow.
-    await state.record(
-      manifest.package,
-      verification.keyFingerprint!,
-      manifest.version,
-      verification.publisher ?? "unknown",
-    );
+    for (const fingerprint of opts.signerFingerprints) {
+      await state.record(
+        manifest.package,
+        fingerprint,
+        manifest.version,
+        opts.publisher ?? "unknown",
+      );
+    }
 
-    // 7. Expiry (required field in contextlock/2; T8).
+    // Expiry (required field in contextlock/2; T8).
     let warning: string | undefined;
     const expiresAt = new Date(manifest.expires_at);
     if (expiresAt.getTime() < Date.now()) {
       const publisherEntry =
-        trustStore.getPublisher(verification.keyId ?? "") ??
-        trustStore.getPublisherByName(verification.publisher ?? "");
+        opts.trustStore.getPublisher(opts.keyId ?? "") ??
+        opts.trustStore.getPublisherByName(opts.publisher ?? "");
       const allowExpired = publisherEntry?.policy?.allow_expired_manifest ?? false;
       if (!allowExpired) {
         return {
           result: {
             status: "expired",
             expiresAt: manifest.expires_at,
-            keyId: verification.keyId,
-            publisher: verification.publisher,
+            keyId: opts.keyId,
+            publisher: opts.publisher,
           },
           manifest,
-          verification,
         };
       }
       warning = "manifest is expired but allowed by publisher policy";
     }
 
-    // 8. Missing lint attestations are worth a warning (SPEC v2 6.7).
+    // Missing lint attestations are worth a warning (SPEC v2 6.7).
     if (!manifest.lints) {
       warning = warning ? `${warning}; ${NO_LINTS_WARNING}` : NO_LINTS_WARNING;
     }
 
     const result: VerificationResult = {
       status: "trusted",
-      publisher: verification.publisher,
-      keyId: verification.keyId,
-      manifestSource: envelopePath,
+      publisher: opts.publisher,
+      keyId: opts.keyId,
+      manifestSource: opts.source,
+      signerCount: opts.signerCount,
     };
     if (warning) {
       result.warning = warning;
       if (expiresAt.getTime() < Date.now()) result.expiresAt = manifest.expires_at;
     }
-    return { result, manifest, verification };
+    return { result, manifest };
   }
 
   /**
@@ -437,13 +599,15 @@ export class VerificationEngine {
 
     // 1. Bounded discovery (T10): stop at the workspace boundary, first found wins.
     const boundary = resolveBoundary(fileDir, this.config.workspaceRoot);
-    const envelopeDir = locateEnvelopeDir(fileDir, boundary);
-    if (!envelopeDir) {
+    const evidence = locateEvidence(fileDir, boundary);
+    if (!evidence) {
       return { status: "untrusted", reason: "no manifest found" };
     }
 
-    const envelopePath = join(envelopeDir, ENVELOPE_FILENAME);
-    const { result: envResult, manifest } = await this.verifyEnvelopeFile(envelopePath);
+    const { result: envResult, manifest } =
+      evidence.kind === "dsse"
+        ? await this.verifyEnvelopeFile(evidence.path)
+        : await this.verifySigstoreFile(evidence.path);
     if (envResult.status !== "trusted") {
       return envResult;
     }
@@ -451,7 +615,7 @@ export class VerificationEngine {
     // 2. Containment (T10): the file's relative path must appear in THIS
     //    manifest. Deeper manifests shadow shallower ones - a miss here does
     //    NOT continue the walk-up.
-    const relPath = relative(envelopeDir, absPath).replace(/\\/g, "/");
+    const relPath = relative(evidence.dir, absPath).replace(/\\/g, "/");
     if (relPath.startsWith("..") || isAbsolute(relPath)) {
       return { status: "untrusted", reason: "file resolves outside the manifest directory" };
     }
@@ -519,8 +683,22 @@ export class VerificationEngine {
    * files) and pre-publish checks.
    */
   async verifyPackage(dir: string): Promise<PackageVerificationResult> {
-    const envelopePath = join(resolve(dir), ENVELOPE_FILENAME);
-    const { result, manifest } = await this.verifyEnvelopeFile(envelopePath);
+    const evidence = evidenceIn(resolve(dir));
+    if (!evidence) {
+      return {
+        ok: false,
+        status: "untrusted",
+        reason: `no ${ENVELOPE_FILENAME} or ${SIGSTORE_BUNDLE_FILENAME} found in package directory`,
+        envelopePath: join(resolve(dir), ENVELOPE_FILENAME),
+        files: [],
+      };
+    }
+
+    const envelopePath = evidence.path;
+    const { result, manifest } =
+      evidence.kind === "dsse"
+        ? await this.verifyEnvelopeFile(envelopePath)
+        : await this.verifySigstoreFile(envelopePath);
 
     if (result.status !== "trusted") {
       return {
