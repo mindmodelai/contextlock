@@ -12,15 +12,15 @@ import { tmpdir } from "node:os";
 
 function makeManifest(overrides: Partial<Manifest> = {}): Manifest {
   return {
-    schema: "tcv-manifest/v1",
+    spec_version: "contextlock/2",
     package: "test-pkg",
-    version: "1.0.0",
+    version: 1,
     publisher: {
       name: "pub",
       key_id: "key-001",
-      public_key_fingerprint: "aabbccdd",
     },
     published_at: "2024-01-01T00:00:00Z",
+    expires_at: "2030-01-01T00:00:00Z",
     files: [],
     ...overrides,
   };
@@ -65,7 +65,7 @@ describe("ManifestCache", () => {
     it("stores and retrieves a verified entry", () => {
       const entry = makeEntry();
       cache.put(entry);
-      const got = cache.get("test-pkg", "1.0.0", "fp-aabbccdd");
+      const got = cache.get("test-pkg", 1, "fp-aabbccdd");
       expect(got).toEqual(entry);
     });
 
@@ -75,8 +75,8 @@ describe("ManifestCache", () => {
 
     it("removes an entry", () => {
       cache.put(makeEntry());
-      cache.remove("test-pkg", "1.0.0", "fp-aabbccdd");
-      expect(cache.get("test-pkg", "1.0.0", "fp-aabbccdd")).toBeUndefined();
+      cache.remove("test-pkg", 1, "fp-aabbccdd");
+      expect(cache.get("test-pkg", 1, "fp-aabbccdd")).toBeUndefined();
     });
 
     it("listEntries returns all cached entries", () => {
@@ -93,7 +93,7 @@ describe("ManifestCache", () => {
     it("overwrites entry with same key", () => {
       cache.put(makeEntry({ fetchedAt: "2024-01-01T00:00:00Z" }));
       cache.put(makeEntry({ fetchedAt: "2024-12-01T00:00:00Z" }));
-      const got = cache.get("test-pkg", "1.0.0", "fp-aabbccdd");
+      const got = cache.get("test-pkg", 1, "fp-aabbccdd");
       expect(got?.fetchedAt).toBe("2024-12-01T00:00:00Z");
       expect(cache.listEntries()).toHaveLength(1);
     });
@@ -123,8 +123,8 @@ describe("ManifestCache", () => {
 
       await cache.refresh(store);
 
-      expect(cache.get("test-pkg", "1.0.0", "fp-unknown")).toBeUndefined();
-      expect(cache.get("known-pkg", "1.0.0", "fp-known")).toBeDefined();
+      expect(cache.get("test-pkg", 1, "fp-unknown")).toBeUndefined();
+      expect(cache.get("known-pkg", 1, "fp-known")).toBeDefined();
     });
 
     it("removes entries whose key is revoked in the trust store", async () => {
@@ -135,7 +135,7 @@ describe("ManifestCache", () => {
 
       await cache.refresh(store);
 
-      expect(cache.get("test-pkg", "1.0.0", "fp-revoked")).toBeUndefined();
+      expect(cache.get("test-pkg", 1, "fp-revoked")).toBeUndefined();
     });
 
     it("keeps entries whose fingerprint is active in the trust store", async () => {
@@ -146,7 +146,7 @@ describe("ManifestCache", () => {
 
       await cache.refresh(store);
 
-      expect(cache.get("test-pkg", "1.0.0", "fp-aabbccdd")).toBeDefined();
+      expect(cache.get("test-pkg", 1, "fp-aabbccdd")).toBeDefined();
     });
   });
 
@@ -172,7 +172,7 @@ describe("ManifestCache", () => {
       const c2 = new ManifestCache(filePath);
       await c2.load();
       expect(c2.listEntries()).toHaveLength(1);
-      expect(c2.get("test-pkg", "1.0.0", "fp-aabbccdd")).toBeDefined();
+      expect(c2.get("test-pkg", 1, "fp-aabbccdd")).toBeDefined();
     });
 
     it("load rejects invalid JSON", async () => {

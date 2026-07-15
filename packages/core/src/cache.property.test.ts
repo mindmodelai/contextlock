@@ -28,17 +28,17 @@ const isoDate = fc
   .map((d) => d.toISOString());
 
 const manifestArb: fc.Arbitrary<Manifest> = fc
-  .tuple(alphaNum, alphaNum, alphaNum, alphaNum, hexString(64), isoDate)
-  .map(([pkg, version, pubName, keyId, fingerprint, publishedAt]) => ({
-    schema: "tcv-manifest/v1" as const,
+  .tuple(alphaNum, fc.integer({ min: 1, max: 1_000_000 }), alphaNum, alphaNum, isoDate)
+  .map(([pkg, version, pubName, keyId, publishedAt]) => ({
+    spec_version: "contextlock/2" as const,
     package: pkg,
     version,
     publisher: {
       name: pubName,
       key_id: keyId,
-      public_key_fingerprint: fingerprint,
     },
     published_at: publishedAt,
+    expires_at: "2030-01-01T00:00:00Z",
     files: [],
   }));
 

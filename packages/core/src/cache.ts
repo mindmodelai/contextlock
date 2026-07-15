@@ -23,14 +23,14 @@ export class ManifestCache {
   }
 
   /** Build the composite key used to index cache entries. */
-  private static key(packageName: string, version: string, fingerprint: string): string {
+  private static key(packageName: string, version: number | string, fingerprint: string): string {
     return `${packageName}:${version}:${fingerprint}`;
   }
 
   /**
    * Retrieve a cached entry by package name, version, and key fingerprint.
    */
-  get(packageName: string, version: string, fingerprint: string): CacheEntry | undefined {
+  get(packageName: string, version: number | string, fingerprint: string): CacheEntry | undefined {
     return this.entries.get(ManifestCache.key(packageName, version, fingerprint));
   }
 
@@ -53,7 +53,7 @@ export class ManifestCache {
   /**
    * Remove a cached entry by package name, version, and key fingerprint.
    */
-  remove(packageName: string, version: string, fingerprint: string): void {
+  remove(packageName: string, version: number | string, fingerprint: string): void {
     this.entries.delete(ManifestCache.key(packageName, version, fingerprint));
   }
 

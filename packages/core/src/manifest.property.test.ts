@@ -1,264 +1,195 @@
-// Feature: contextlock, Properties 3, 4, 5 — Manifest module property tests
-// Property 3: Manifest round-trip — Validates: Requirements 2.5, 13.3
-// Property 4: Detached signature round-trip — Validates: Requirements 13.4
-// Property 5: Invalid manifest rejection — Validates: Requirements 2.2
+// Feature: contextlock — manifest parser property tests (contextlock/2)
+// Property 12: Manifest round-trip
+// Property 13: Schema violation rejection (including path abuse, T10/T11)
+// Property 3/4 (v2): DSSE envelope sign/verify round-trip and tamper rejection
 
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
+import { sha512 } from "@noble/hashes/sha2";
+import * as ed from "@noble/ed25519";
 import {
   parseManifest,
   serializeManifest,
-  parseSignature,
-  serializeSignature,
+  validateManifest,
   type Manifest,
-  type DetachedSignature,
 } from "./manifest.js";
+import { signEnvelope, verifyEnvelope, b64Encode, MANIFEST_PAYLOAD_TYPE } from "./dsse.js";
+
+if (!ed.etc.sha512Sync) {
+  ed.etc.sha512Sync = (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
+}
 
 // ---- Arbitraries ----
 
-/** Lowercase hex string of exact length */
-const hexString = (len: number) =>
-  fc
-    .array(fc.integer({ min: 0, max: 15 }), { minLength: len, maxLength: len })
-    .map((nums) => nums.map((n) => n.toString(16)).join(""));
-
-/** Non-empty alphanumeric string */
-const alphaNum = fc
+const hexHash = fc
   .array(
-    fc.constantFrom(..."abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".split("")),
-    { minLength: 1, maxLength: 20 },
+    fc.constantFrom("0","1","2","3","4","5","6","7","8","9","a","b","c","d","e","f"),
+    { minLength: 64, maxLength: 64 },
   )
   .map((chars) => chars.join(""));
 
-/** Semver-like version string e.g. "1.0.0" */
-const semver = fc
-  .tuple(
-    fc.integer({ min: 0, max: 99 }),
-    fc.integer({ min: 0, max: 99 }),
-    fc.integer({ min: 0, max: 99 }),
-  )
-  .map(([ma, mi, pa]) => `${ma}.${mi}.${pa}`);
+const safeSegment = fc
+  .stringMatching(/^[A-Za-z0-9_-]{1,12}$/)
+  .filter((s) => s !== "." && s !== "..");
 
-/** Valid ISO 8601 date string — built from integer components to avoid invalid Date edge cases */
-const iso8601 = fc
-  .tuple(
-    fc.integer({ min: 2000, max: 2099 }),
-    fc.integer({ min: 1, max: 12 }),
-    fc.integer({ min: 1, max: 28 }), // cap at 28 to avoid month-length issues
-    fc.integer({ min: 0, max: 23 }),
-    fc.integer({ min: 0, max: 59 }),
-    fc.integer({ min: 0, max: 59 }),
-  )
-  .map(
-    ([y, mo, d, h, mi, s]) =>
-      `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}T${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}:${String(s).padStart(2, "0")}Z`,
-  );
+const safePath = fc
+  .array(safeSegment, { minLength: 1, maxLength: 4 })
+  .map((segs) => segs.join("/") + ".md");
 
-/** Base64url-safe string (non-empty) */
-const base64url = fc
-  .array(fc.integer({ min: 0, max: 255 }), { minLength: 8, maxLength: 64 })
-  .map((bytes) =>
-    Buffer.from(bytes)
-      .toString("base64")
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, ""),
-  );
+const isoDate = fc
+  .integer({ min: new Date("2020-01-01").getTime(), max: new Date("2035-01-01").getTime() })
+  .map((ms) => new Date(ms).toISOString());
 
-/** Unique file path for manifest entries */
-const filePath = fc
-  .tuple(alphaNum, fc.constantFrom(".md", ".txt", ".json", ".ts"))
-  .map(([name, ext]) => `${name}${ext}`);
+const fileEntryArb = fc.record({
+  path: safePath,
+  sha256: hexHash,
+  length: fc.integer({ min: 0, max: 10_000_000 }),
+});
 
-/** Single ManifestFileEntry */
-const fileEntry = fc
-  .tuple(filePath, hexString(64), fc.integer({ min: 1, max: 1_000_000 }))
-  .map(([path, sha256, size]) => ({ path, sha256, size }));
+const uniqueFilesArb = fc
+  .array(fileEntryArb, { minLength: 1, maxLength: 8 })
+  .filter((files) => new Set(files.map((f) => f.path)).size === files.length);
 
-/** Array of file entries with unique paths */
-const uniqueFileEntries = fc
-  .array(fileEntry, { minLength: 1, maxLength: 10 })
-  .map((entries) => {
-    const seen = new Set<string>();
-    return entries.filter((e) => {
-      if (seen.has(e.path)) return false;
-      seen.add(e.path);
-      return true;
-    });
+const validManifestArb: fc.Arbitrary<Manifest> = fc
+  .record({
+    packageName: fc.stringMatching(/^[a-z][a-z0-9-]{1,30}$/),
+    version: fc.integer({ min: 1, max: 1_000_000 }),
+    publisherName: fc.string({ minLength: 1, maxLength: 30 }),
+    keyId: fc.stringMatching(/^[a-z0-9-]{2,20}$/),
+    publishedAt: isoDate,
+    expiresAt: isoDate,
+    files: uniqueFilesArb,
   })
-  .filter((entries) => entries.length > 0);
-
-/** Valid Manifest arbitrary */
-const manifestArb: fc.Arbitrary<Manifest> = fc
-  .tuple(
-    alphaNum,
-    semver,
-    alphaNum,
-    alphaNum,
-    hexString(64),
-    iso8601,
-    fc.option(iso8601, { nil: undefined }),
-    uniqueFileEntries,
-  )
-  .map(
-    ([pkg, version, pubName, keyId, fingerprint, publishedAt, expiresAt, files]) =>
-      ({
-        schema: "tcv-manifest/v1" as const,
-        package: pkg,
-        version,
-        publisher: {
-          name: pubName,
-          key_id: keyId,
-          public_key_fingerprint: fingerprint,
-        },
-        published_at: publishedAt,
-        ...(expiresAt !== undefined ? { expires_at: expiresAt } : {}),
-        files,
-      }) as Manifest,
-  );
-
-/** Valid DetachedSignature arbitrary */
-const signatureArb: fc.Arbitrary<DetachedSignature> = fc
-  .tuple(hexString(64), alphaNum, base64url)
-  .map(([manifestSha256, keyId, signature]) => ({
-    schema: "tcv-signature/v1" as const,
-    manifest_sha256: manifestSha256,
-    algorithm: "Ed25519" as const,
-    key_id: keyId,
-    signature,
+  .map((r) => ({
+    spec_version: "contextlock/2" as const,
+    package: r.packageName,
+    version: r.version,
+    publisher: { name: r.publisherName, key_id: r.keyId },
+    published_at: r.publishedAt,
+    expires_at: r.expiresAt,
+    files: r.files,
   }));
 
-// ---- Property 3: Manifest round-trip ----
+// ---- Property 12: Round-trip ----
 
-describe("Property 3: Manifest round-trip", () => {
-  // **Validates: Requirements 2.5, 13.3**
-  it("parseManifest(serializeManifest(m)) deep-equals m for any valid Manifest", () => {
+describe("Property 12: Manifest round-trip", () => {
+  it("parseManifest(serializeManifest(m)) deep-equals m for any valid manifest", () => {
     fc.assert(
-      fc.property(manifestArb, (m) => {
-        const json = serializeManifest(m);
-        const parsed = parseManifest(json);
+      fc.property(validManifestArb, (m) => {
+        expect(validateManifest(m)).toEqual([]);
+        const parsed = parseManifest(serializeManifest(m));
         expect(parsed).toEqual(m);
       }),
-      { numRuns: 100 },
+      { numRuns: 200 },
     );
   });
 });
 
-// ---- Property 4: Detached signature round-trip ----
+// ---- Property 13: Schema violation rejection ----
 
-describe("Property 4: Detached signature round-trip", () => {
-  // **Validates: Requirements 13.4**
-  it("parseSignature(serializeSignature(s)) deep-equals s for any valid DetachedSignature", () => {
+type Mutation = (m: Record<string, unknown>) => Record<string, unknown>;
+
+function mutateFirstFile(
+  m: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const files = [...(m.files as Array<Record<string, unknown>>)];
+  files[0] = { ...files[0], ...patch };
+  return { ...m, files };
+}
+
+const mutations: Array<[string, Mutation]> = [
+  ["wrong spec_version", (m) => ({ ...m, spec_version: "tcv-manifest/v1" })],
+  ["missing package", (m) => { const c = { ...m }; delete c.package; return c; }],
+  ["semver string version", (m) => ({ ...m, version: "1.0.0" })],
+  ["zero version", (m) => ({ ...m, version: 0 })],
+  ["float version", (m) => ({ ...m, version: 1.25 })],
+  ["missing expires_at", (m) => { const c = { ...m }; delete c.expires_at; return c; }],
+  ["invalid expires_at", (m) => ({ ...m, expires_at: "eventually" })],
+  ["missing publisher", (m) => { const c = { ...m }; delete c.publisher; return c; }],
+  ["traversal path", (m) => mutateFirstFile(m, { path: "../escape.md" })],
+  ["absolute path", (m) => mutateFirstFile(m, { path: "/etc/passwd" })],
+  ["backslash path", (m) => mutateFirstFile(m, { path: "dir\\file.md" })],
+  ["dot segment path", (m) => mutateFirstFile(m, { path: "./file.md" })],
+  ["uppercase sha256", (m) => mutateFirstFile(m, { sha256: "A".repeat(64) })],
+  ["short sha256", (m) => mutateFirstFile(m, { sha256: "abc" })],
+  ["negative length", (m) => mutateFirstFile(m, { length: -1 })],
+  ["duplicate paths", (m) => {
+    const files = [...(m.files as Array<Record<string, unknown>>)];
+    files.push({ ...files[0] });
+    return { ...m, files };
+  }],
+];
+
+describe("Property 13: Schema violation rejection", () => {
+  it("every mutation of a valid manifest is rejected by validateManifest and parseManifest", () => {
     fc.assert(
-      fc.property(signatureArb, (s) => {
-        const json = serializeSignature(s);
-        const parsed = parseSignature(json);
-        expect(parsed).toEqual(s);
-      }),
-      { numRuns: 100 },
+      fc.property(
+        validManifestArb,
+        fc.integer({ min: 0, max: mutations.length - 1 }),
+        (valid, mutationIdx) => {
+          const [name, mutate] = mutations[mutationIdx];
+          const broken = mutate(JSON.parse(JSON.stringify(valid)));
+          const errors = validateManifest(broken);
+          expect(errors.length, `mutation "${name}" should produce errors`).toBeGreaterThan(0);
+          expect(() => parseManifest(JSON.stringify(broken))).toThrow();
+        },
+      ),
+      { numRuns: 200 },
     );
   });
 });
 
-// ---- Property 5: Invalid manifest rejection ----
+// ---- Property 3/4: DSSE sign/verify round-trip and tamper rejection ----
 
-/**
- * Generates JSON objects that violate the tcv-manifest/v1 schema in various ways:
- * - Missing required fields
- * - Wrong schema value
- * - files set to non-array
- * - Required string fields set to numbers or empty strings
- */
-const invalidManifestArb = fc.oneof(
-  // Strategy 1: Remove a random required field
-  fc
-    .constantFrom("schema", "package", "version", "publisher", "published_at", "files")
-    .map((fieldToRemove) => {
-      const base: Record<string, unknown> = {
-        schema: "tcv-manifest/v1",
-        package: "test-pkg",
-        version: "1.0.0",
-        publisher: {
-          name: "Alice",
-          key_id: "key-1",
-          public_key_fingerprint: "a".repeat(64),
-        },
-        published_at: "2025-01-15T12:00:00Z",
-        files: [{ path: "README.md", sha256: "b".repeat(64), size: 100 }],
-      };
-      delete base[fieldToRemove];
-      return base;
-    }),
+describe("Property 3/4: DSSE envelope sign/verify (v2)", () => {
+  it("any valid manifest signed into an envelope verifies and returns identical payload bytes", async () => {
+    const privateKey = ed.utils.randomPrivateKey();
+    const publicKey = await ed.getPublicKeyAsync(privateKey);
 
-  // Strategy 2: Wrong schema value
-  fc.string({ minLength: 1, maxLength: 20 }).map((wrongSchema) => ({
-    schema: wrongSchema === "tcv-manifest/v1" ? "wrong/v1" : wrongSchema,
-    package: "test-pkg",
-    version: "1.0.0",
-    publisher: {
-      name: "Alice",
-      key_id: "key-1",
-      public_key_fingerprint: "a".repeat(64),
-    },
-    published_at: "2025-01-15T12:00:00Z",
-    files: [{ path: "README.md", sha256: "b".repeat(64), size: 100 }],
-  })),
-
-  // Strategy 3: files set to non-array types
-  fc.oneof(fc.string(), fc.integer(), fc.constant(null), fc.constant({})).map(
-    (badFiles) => ({
-      schema: "tcv-manifest/v1",
-      package: "test-pkg",
-      version: "1.0.0",
-      publisher: {
-        name: "Alice",
-        key_id: "key-1",
-        public_key_fingerprint: "a".repeat(64),
-      },
-      published_at: "2025-01-15T12:00:00Z",
-      files: badFiles,
-    }),
-  ),
-
-  // Strategy 4: Required string fields set to empty strings or numbers
-  fc
-    .constantFrom("package", "version")
-    .chain((field) =>
-      fc.oneof(fc.constant(""), fc.integer()).map((badValue) => ({
-        schema: "tcv-manifest/v1",
-        [field]: badValue,
-        package: field === "package" ? badValue : "test-pkg",
-        version: field === "version" ? badValue : "1.0.0",
-        publisher: {
-          name: "Alice",
-          key_id: "key-1",
-          public_key_fingerprint: "a".repeat(64),
-        },
-        published_at: "2025-01-15T12:00:00Z",
-        files: [{ path: "README.md", sha256: "b".repeat(64), size: 100 }],
-      })),
-    ),
-
-  // Strategy 5: publisher set to non-object
-  fc.oneof(fc.string(), fc.integer(), fc.constant(null)).map((badPub) => ({
-    schema: "tcv-manifest/v1",
-    package: "test-pkg",
-    version: "1.0.0",
-    publisher: badPub,
-    published_at: "2025-01-15T12:00:00Z",
-    files: [{ path: "README.md", sha256: "b".repeat(64), size: 100 }],
-  })),
-);
-
-describe("Property 5: Invalid manifest rejection", () => {
-  // **Validates: Requirements 2.2**
-  it("parseManifest throws with a descriptive reason for any invalid manifest JSON", () => {
-    fc.assert(
-      fc.property(invalidManifestArb, (invalidObj) => {
-        const json = JSON.stringify(invalidObj);
-        expect(() => parseManifest(json)).toThrow(/Invalid manifest/);
+    await fc.assert(
+      fc.asyncProperty(validManifestArb, async (m) => {
+        const payload = Buffer.from(serializeManifest(m), "utf-8");
+        const env = await signEnvelope(payload, MANIFEST_PAYLOAD_TYPE, [
+          { privateKey, keyid: "prop-key" },
+        ]);
+        const result = await verifyEnvelope(env, [
+          { keyid: "prop-key", publicKey, publisher: "P", revoked: false },
+        ]);
+        expect(result.valid).toBe(true);
+        expect(result.payload!.equals(payload)).toBe(true);
+        expect(parseManifest(result.payload!)).toEqual(m);
       }),
-      { numRuns: 100 },
+      { numRuns: 50 },
+    );
+  });
+
+  it("any single-byte flip in the payload makes verification fail", async () => {
+    const privateKey = ed.utils.randomPrivateKey();
+    const publicKey = await ed.getPublicKeyAsync(privateKey);
+
+    await fc.assert(
+      fc.asyncProperty(
+        validManifestArb,
+        fc.nat(),
+        async (m, seed) => {
+          const payload = Buffer.from(serializeManifest(m), "utf-8");
+          const env = await signEnvelope(payload, MANIFEST_PAYLOAD_TYPE, [
+            { privateKey, keyid: "prop-key" },
+          ]);
+
+          const flipped = Buffer.from(payload);
+          const idx = seed % flipped.length;
+          flipped[idx] = flipped[idx] ^ 0x01;
+          const tampered = { ...env, payload: b64Encode(flipped) };
+
+          const result = await verifyEnvelope(tampered, [
+            { keyid: "prop-key", publicKey, publisher: "P", revoked: false },
+          ]);
+          expect(result.valid).toBe(false);
+        },
+      ),
+      { numRuns: 50 },
     );
   });
 });

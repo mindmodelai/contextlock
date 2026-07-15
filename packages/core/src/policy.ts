@@ -17,6 +17,7 @@ export type VerificationStatus =
   | "untrusted"
   | "revoked"
   | "expired"
+  | "rollback"
   | "error"
   | "seal-store-unavailable";
 
@@ -31,7 +32,8 @@ export interface PolicyInput {
 // Mode 0 evidence (SPEC v2 5): a valid seal behaves as trusted; a
 // seal-store-unavailable error behaves exactly like `error` (block under
 // strict/balanced) so a tampered/corrupt store never silently downgrades to
-// "unsealed".
+// "unsealed". `rollback` (T7: replaying an older signed manifest) blocks under
+// both strict and balanced - it is an active attack signal like `revoked`.
 const POLICY_MATRIX: Record<PolicyLevel, Record<VerificationStatus, PolicyDecision>> = {
   strict: {
     trusted: "allow",
@@ -41,6 +43,7 @@ const POLICY_MATRIX: Record<PolicyLevel, Record<VerificationStatus, PolicyDecisi
     untrusted: "block",
     revoked: "block",
     expired: "block",
+    rollback: "block",
     error: "block",
     "seal-store-unavailable": "block",
   },
@@ -52,6 +55,7 @@ const POLICY_MATRIX: Record<PolicyLevel, Record<VerificationStatus, PolicyDecisi
     untrusted: "warn",
     revoked: "block",
     expired: "warn",
+    rollback: "block",
     error: "block",
     "seal-store-unavailable": "block",
   },
@@ -63,6 +67,7 @@ const POLICY_MATRIX: Record<PolicyLevel, Record<VerificationStatus, PolicyDecisi
     untrusted: "audit",
     revoked: "audit",
     expired: "audit",
+    rollback: "audit",
     error: "audit",
     "seal-store-unavailable": "audit",
   },

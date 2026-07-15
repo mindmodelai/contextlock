@@ -31,31 +31,70 @@ export type { LocalKey } from "./localkey.js";
 export { SealStore, SEAL_STORE_SPEC } from "./seal.js";
 export type { SealEntry, SealVerdict, SealStatus } from "./seal.js";
 
-// Manifest Parser
+// Manifest (contextlock/2, SPEC v2 6.3)
 export {
   parseManifest,
   serializeManifest,
-  parseSignature,
-  serializeSignature,
   validateManifest,
-  validateSignature,
+  manifestPathError,
+  MANIFEST_SPEC_VERSION,
+  MAX_MANIFEST_BYTES,
+  MAX_MANIFEST_FILES,
 } from "./manifest.js";
 export type {
   Manifest,
   ManifestFileEntry,
-  DetachedSignature,
+  ManifestPublisher,
   ValidationError,
 } from "./manifest.js";
 
-// Signature Verifier
-export { verifySignature } from "./signature.js";
+// DSSE envelope (SPEC v2 6.2)
+export {
+  pae,
+  parseEnvelope,
+  serializeEnvelope,
+  validateEnvelope,
+  signEnvelope,
+  verifyEnvelope,
+  envelopeVerifiesWithKey,
+  verifyingKeyIds,
+  b64Decode,
+  b64Encode,
+  MANIFEST_PAYLOAD_TYPE,
+  ROOT_PAYLOAD_TYPE,
+  ENVELOPE_FILENAME,
+  MAX_ENVELOPE_BYTES,
+} from "./dsse.js";
 export type {
-  SignatureVerificationInput,
-  SignatureVerificationOutput,
-} from "./signature.js";
+  DsseEnvelope,
+  DsseSignature,
+  CandidateKey,
+  EnvelopeVerification,
+  EnvelopeSigner,
+} from "./dsse.js";
+
+// Root of trust + rotation (SPEC v2 6.5)
+export {
+  validateRoot,
+  parseRoot,
+  rootExpired,
+  verifyInitialRoot,
+  verifyRootTransition,
+  ROOT_SPEC_VERSION,
+  ROOT_ENVELOPE_FILENAME,
+} from "./root.js";
+export type { RootFile, RootKey, RootVerification } from "./root.js";
+
+// Anti-rollback state (SPEC v2 6.3, T7)
+export { RollbackState, STATE_STORE_SPEC } from "./state.js";
+export type { RollbackEntry, RollbackCheck } from "./state.js";
+
+// Sign-time content lints (SPEC v2 6.7)
+export { lintContent, buildLintAttestation, LINT_RULES } from "./lints.js";
+export type { LintRule, LintHit } from "./lints.js";
 
 // Trust Store
-export { TrustStore } from "./trust-store.js";
+export { TrustStore, TRUST_STORE_SPEC } from "./trust-store.js";
 export type {
   TrustedPublisher,
   PublisherPolicy,
@@ -76,7 +115,7 @@ export type {
 // Protected File Detector
 export { DEFAULT_PATTERNS, isProtectedFile, findProtectedFiles } from "./detector.js";
 
-// Filename Hash Extractor
+// Filename Hash Extractor (Mode 1: change hints, not a security mode)
 export { extractFilenameHash, verifyFilenameHash } from "./filename-hash.js";
 export type { FilenameHashResult } from "./filename-hash.js";
 
@@ -91,6 +130,7 @@ export { VerificationStatus as EngineVerificationStatus } from "./engine.js";
 export type {
   VerificationEngineConfig,
   VerificationResult,
+  PackageVerificationResult,
 } from "./engine.js";
 
 // Tool Adapter Interface

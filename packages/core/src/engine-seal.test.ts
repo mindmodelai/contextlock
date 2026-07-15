@@ -3,8 +3,6 @@
 // and the seal-store-unavailable error path through the policy matrix.
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import * as ed from "@noble/ed25519";
-import { sha512 } from "@noble/hashes/sha2";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -12,79 +10,22 @@ import { VerificationEngine } from "./engine.js";
 import { SealStore } from "./seal.js";
 import { sha256 } from "./hash.js";
 import { evaluatePolicy } from "./policy.js";
-import { serializeManifest, serializeSignature } from "./manifest.js";
-import type { Manifest, DetachedSignature } from "./manifest.js";
-import type { TrustStoreData } from "./trust-store.js";
+import { makeKeypair, writeSignedPackage, writeTrustStore, uniquePackageName } from "./testkit.js";
 
-if (!ed.etc.sha512Sync) {
-  ed.etc.sha512Sync = (...m: Uint8Array[]) => sha512(ed.etc.concatBytes(...m));
-}
-
-function toBase64url(buf: Uint8Array): string {
-  return Buffer.from(buf)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-/** Writes manifest.json + manifest.sig.json + truststore.json for a package dir. */
-async function writeSignedPackage(
+/** Writes a signed v2 package (envelope) + signed trust store for one file. */
+async function writeSignedPackageWithStore(
   pkgDir: string,
   fileName: string,
   fileContent: string,
 ): Promise<string> {
-  const privKey = ed.utils.randomPrivateKey();
-  const pubKey = await ed.getPublicKeyAsync(privKey);
-  const keyId = "seal-int-key";
-  const fingerprint = sha256(Buffer.from(pubKey));
-
-  const manifest: Manifest = {
-    schema: "tcv-manifest/v1",
-    package: "seal-int-pkg",
-    version: "1.0.0",
-    publisher: { name: "SealIntPublisher", key_id: keyId, public_key_fingerprint: fingerprint },
-    published_at: "2026-01-01T00:00:00Z",
-    files: [
-      {
-        path: fileName,
-        sha256: sha256(Buffer.from(fileContent, "utf-8")),
-        size: Buffer.byteLength(fileContent, "utf-8"),
-      },
-    ],
-  };
-  const manifestJson = serializeManifest(manifest);
-  const manifestBuf = Buffer.from(manifestJson, "utf-8");
-  const sigBytes = await ed.signAsync(manifestBuf, privKey);
-  const sig: DetachedSignature = {
-    schema: "tcv-signature/v1",
-    manifest_sha256: sha256(manifestBuf),
-    algorithm: "Ed25519",
-    key_id: keyId,
-    signature: toBase64url(sigBytes),
-  };
-  await writeFile(join(pkgDir, "manifest.json"), manifestJson, "utf-8");
-  await writeFile(join(pkgDir, "manifest.sig.json"), serializeSignature(sig), "utf-8");
-
-  const trustStoreData: TrustStoreData = {
-    schema: "tcv-truststore/v1",
-    trusted_publishers: [
-      {
-        publisher: "SealIntPublisher",
-        key_id: keyId,
-        public_key: Buffer.from(pubKey).toString("base64"),
-        fingerprint,
-        revoked: false,
-        policy: {
-          default_action: "block",
-          allow_expired_manifest: false,
-          allow_offline_cached_manifest: false,
-        },
-      },
-    ],
-  };
+  const kp = await makeKeypair("seal-int-key");
+  await writeSignedPackage(pkgDir, kp, {
+    packageName: uniquePackageName("seal-int"),
+    publisherName: "SealIntPublisher",
+    files: { [fileName]: fileContent },
+  });
   const trustStorePath = join(pkgDir, "truststore.json");
-  await writeFile(trustStorePath, JSON.stringify(trustStoreData, null, 2), "utf-8");
+  await writeTrustStore(trustStorePath, [kp], { publisherName: "SealIntPublisher" });
   return trustStorePath;
 }
 
@@ -112,6 +53,7 @@ function makeEngine(trustStorePath: string): VerificationEngine {
     cachePath: "",
     protectedPatterns: ["**/SKILL.md", "**/CLAUDE.md"],
     policyLevel: "strict",
+    workspaceRoot: pkgDir,
   });
 }
 
@@ -133,8 +75,7 @@ describe("Engine seal integration (SPEC v2 combination rules)", () => {
   it("seal ok + manifest trusted = sealed+trusted", async () => {
     const content = "# sealed and signed\n";
     const filePath = join(pkgDir, "SKILL.md");
-    await writeFile(filePath, content, "utf-8");
-    const trustStorePath = await writeSignedPackage(pkgDir, "SKILL.md", content);
+    const trustStorePath = await writeSignedPackageWithStore(pkgDir, "SKILL.md", content);
 
     const store = new SealStore();
     await store.load();
@@ -157,9 +98,8 @@ describe("Engine seal integration (SPEC v2 combination rules)", () => {
     await store.load();
     await store.sealFile(filePath);
 
-    // Attacker replaces the content AND ships a valid manifest for it.
-    await writeFile(filePath, attacker, "utf-8");
-    const trustStorePath = await writeSignedPackage(pkgDir, "SKILL.md", attacker);
+    // Attacker replaces the content AND ships a valid signed envelope for it.
+    const trustStorePath = await writeSignedPackageWithStore(pkgDir, "SKILL.md", attacker);
 
     const engine = makeEngine(trustStorePath);
     const result = await engine.verify(filePath);
@@ -171,8 +111,7 @@ describe("Engine seal integration (SPEC v2 combination rules)", () => {
   it("no seal + manifest trusted = trusted (existing behavior)", async () => {
     const content = "# signed only\n";
     const filePath = join(pkgDir, "SKILL.md");
-    await writeFile(filePath, content, "utf-8");
-    const trustStorePath = await writeSignedPackage(pkgDir, "SKILL.md", content);
+    const trustStorePath = await writeSignedPackageWithStore(pkgDir, "SKILL.md", content);
 
     const engine = makeEngine(trustStorePath);
     const result = await engine.verify(filePath);
@@ -230,5 +169,11 @@ describe("Engine seal integration (SPEC v2 combination rules)", () => {
         expect(evaluatePolicy({ level, verificationResult: { status } })).toBe("allow");
       }
     }
+  });
+
+  it("policy: rollback blocks under strict and balanced, audits under audit", () => {
+    expect(evaluatePolicy({ level: "strict", verificationResult: { status: "rollback" } })).toBe("block");
+    expect(evaluatePolicy({ level: "balanced", verificationResult: { status: "rollback" } })).toBe("block");
+    expect(evaluatePolicy({ level: "audit", verificationResult: { status: "rollback" } })).toBe("audit");
   });
 });

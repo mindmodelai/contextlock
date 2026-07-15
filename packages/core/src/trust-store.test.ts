@@ -105,14 +105,32 @@ describe("TrustStore", () => {
       expect(loaded.listPublishers()).toEqual([pub]);
     });
 
-    it("persists schema as tcv-truststore/v1", async () => {
+    it("persists schema as contextlock-truststore/2", async () => {
       const filePath = join(tmpDir, "truststore.json");
       await store.save(filePath);
 
       const raw = await readFile(filePath, "utf-8");
       const parsed = JSON.parse(raw) as TrustStoreData;
-      expect(parsed.schema).toBe("tcv-truststore/v1");
+      expect(parsed.schema).toBe("contextlock-truststore/2");
       expect(parsed.trusted_publishers).toEqual([]);
+    });
+
+    it("loads a legacy tcv-truststore/v1 store and upgrades on save", async () => {
+      const pub = makePublisher();
+      const filePath = join(tmpDir, "legacy.json");
+      await writeFile(
+        filePath,
+        JSON.stringify({ schema: "tcv-truststore/v1", trusted_publishers: [pub] }),
+        "utf-8",
+      );
+
+      const loaded = new TrustStore();
+      await loaded.load(filePath);
+      expect(loaded.listPublishers()).toEqual([pub]);
+
+      await loaded.save(filePath);
+      const parsed = JSON.parse(await readFile(filePath, "utf-8")) as TrustStoreData;
+      expect(parsed.schema).toBe("contextlock-truststore/2");
     });
 
     it("rejects invalid schema", async () => {

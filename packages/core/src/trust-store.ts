@@ -4,6 +4,10 @@ import {
   verifyWithLocalKey,
   canonicalJson,
 } from "./localkey.js";
+import type { CandidateKey } from "./dsse.js";
+import { b64Decode } from "./dsse.js";
+import type { RootFile } from "./root.js";
+import { rootExpired } from "./root.js";
 
 // ---- Interfaces ----
 
@@ -15,6 +19,7 @@ export interface PublisherPolicy {
 
 export interface TrustedPublisher {
   publisher: string;
+  /** Short key label (minisign-style id, e.g. "cl-acme-2026"). */
   key_id: string;
   public_key: string;       // base64-encoded Ed25519 public key
   fingerprint: string;       // SHA-256 hex of public key
@@ -22,10 +27,15 @@ export interface TrustedPublisher {
   policy: PublisherPolicy;
 }
 
+export const TRUST_STORE_SPEC = "contextlock-truststore/2" as const;
+const LEGACY_TRUST_STORE_SPEC = "tcv-truststore/v1";
+
 export interface TrustStoreData {
-  schema: "tcv-truststore/v1";
+  schema: typeof TRUST_STORE_SPEC;
   trusted_publishers: TrustedPublisher[];
-  /** Machine-local signature over canonicalJson({schema, trusted_publishers}). */
+  /** Pinned publisher roots (SPEC v2 6.5), keyed by publisher name. */
+  roots?: Record<string, RootFile>;
+  /** Machine-local signature over canonicalJson({schema, roots, trusted_publishers}). */
   sig?: { key_fingerprint: string; signature: string };
 }
 
@@ -36,15 +46,18 @@ const warnedLegacyPaths = new Set<string>();
 
 export class TrustStore {
   private publishers: TrustedPublisher[] = [];
+  private roots: Record<string, RootFile> = {};
 
   /**
    * Loads trust store data from a JSON file (SPEC v2 8: signed local state).
    *
-   * - Missing file / invalid JSON / bad schema: throws (unchanged from v1).
+   * - Missing file / invalid JSON / bad schema: throws.
    * - Signed store: verifies the signature against the machine-local key; a bad
    *   signature is LOUD (throws) and never falls back to empty trust.
    * - Unsigned legacy store: loads with a one-time warning and will be re-signed
    *   on the next save (migration path).
+   * - Legacy `tcv-truststore/v1` stores load (with their original signed shape)
+   *   and are upgraded to `contextlock-truststore/2` on the next save.
    */
   async load(path: string): Promise<void> {
     const content = await readFile(path, "utf-8");
@@ -55,13 +68,14 @@ export class TrustStore {
       throw new Error(`Invalid JSON in trust store file: ${path}`);
     }
 
-    if (
-      parsed == null ||
-      typeof parsed !== "object" ||
-      (parsed as Record<string, unknown>).schema !== "tcv-truststore/v1"
-    ) {
+    const schema =
+      parsed != null && typeof parsed === "object"
+        ? (parsed as Record<string, unknown>).schema
+        : undefined;
+    const isLegacy = schema === LEGACY_TRUST_STORE_SPEC;
+    if (schema !== TRUST_STORE_SPEC && !isLegacy) {
       throw new Error(
-        `Invalid trust store schema: expected "tcv-truststore/v1"`
+        `Invalid trust store schema: expected "${TRUST_STORE_SPEC}"`
       );
     }
 
@@ -69,12 +83,17 @@ export class TrustStore {
     const publishers = Array.isArray(data.trusted_publishers)
       ? data.trusted_publishers
       : [];
+    const roots =
+      data.roots != null && typeof data.roots === "object" && !Array.isArray(data.roots)
+        ? data.roots
+        : {};
 
     if (data.sig && typeof data.sig.signature === "string") {
-      const payload = canonicalJson({
-        schema: "tcv-truststore/v1",
-        trusted_publishers: publishers,
-      });
+      // Legacy stores were signed over {schema, trusted_publishers}; v2 stores
+      // over {schema, roots, trusted_publishers} (keys sorted by canonicalJson).
+      const payload = isLegacy
+        ? canonicalJson({ schema: LEGACY_TRUST_STORE_SPEC, trusted_publishers: publishers })
+        : canonicalJson({ schema: TRUST_STORE_SPEC, roots, trusted_publishers: publishers });
       const { valid } = await verifyWithLocalKey(
         Buffer.from(payload, "utf-8"),
         data.sig.signature,
@@ -92,14 +111,17 @@ export class TrustStore {
     }
 
     this.publishers = publishers;
+    this.roots = roots;
   }
 
   /**
    * Signs and saves the trust store with the machine-local key (SPEC v2 8).
+   * Always writes the current `contextlock-truststore/2` schema.
    */
   async save(path: string): Promise<void> {
     const base = {
-      schema: "tcv-truststore/v1" as const,
+      schema: TRUST_STORE_SPEC,
+      roots: this.roots,
       trusted_publishers: this.publishers,
     };
     const canonical = canonicalJson(base);
@@ -121,24 +143,34 @@ export class TrustStore {
   }
 
   /**
-   * Removes a publisher entry by key_id.
+   * Removes a publisher entry by key_id (label) or fingerprint.
    */
   removePublisher(keyId: string): void {
-    this.publishers = this.publishers.filter((p) => p.key_id !== keyId);
+    this.publishers = this.publishers.filter(
+      (p) => p.key_id !== keyId && p.fingerprint !== keyId,
+    );
   }
 
   /**
-   * Finds a publisher entry by key_id.
+   * Finds a publisher entry by key_id (label) or fingerprint.
    */
   getPublisher(keyId: string): TrustedPublisher | undefined {
-    return this.publishers.find((p) => p.key_id === keyId);
+    return this.publishers.find((p) => p.key_id === keyId || p.fingerprint === keyId);
   }
 
   /**
-   * Marks a key as revoked by key_id.
+   * Finds the publisher policy that applies to a publisher display name
+   * (used when the verifying key came from a pinned root).
+   */
+  getPublisherByName(name: string): TrustedPublisher | undefined {
+    return this.publishers.find((p) => p.publisher === name);
+  }
+
+  /**
+   * Marks a key as revoked by key_id (label) or fingerprint.
    */
   revokeKey(keyId: string): void {
-    const publisher = this.publishers.find((p) => p.key_id === keyId);
+    const publisher = this.getPublisher(keyId);
     if (publisher) {
       publisher.revoked = true;
     }
@@ -149,5 +181,65 @@ export class TrustStore {
    */
   listPublishers(): TrustedPublisher[] {
     return [...this.publishers];
+  }
+
+  // ---- Roots (SPEC v2 6.5) ----
+
+  /** Pins or replaces the current root for a publisher. */
+  setRoot(publisher: string, root: RootFile): void {
+    this.roots[publisher] = root;
+  }
+
+  getRoot(publisher: string): RootFile | undefined {
+    return this.roots[publisher];
+  }
+
+  removeRoot(publisher: string): boolean {
+    if (this.roots[publisher] === undefined) return false;
+    delete this.roots[publisher];
+    return true;
+  }
+
+  listRoots(): Array<{ publisher: string; root: RootFile }> {
+    return Object.entries(this.roots).map(([publisher, root]) => ({ publisher, root }));
+  }
+
+  /**
+   * Resolves the candidate verification keys for DSSE envelope verification:
+   * every pinned publisher key (revoked ones included, so a revoked-key
+   * signature is reported as "revoked" and not "unknown") plus every key of
+   * every non-expired pinned root. Keys from expired roots are excluded -
+   * an expired root must be rotated or re-pinned before its keys verify.
+   */
+  candidateKeys(now: Date = new Date()): CandidateKey[] {
+    const candidates: CandidateKey[] = [];
+    for (const p of this.publishers) {
+      try {
+        candidates.push({
+          keyid: p.key_id,
+          publicKey: new Uint8Array(b64Decode(p.public_key)),
+          publisher: p.publisher,
+          revoked: p.revoked,
+        });
+      } catch {
+        // Skip malformed key material rather than aborting resolution.
+      }
+    }
+    for (const [publisher, root] of Object.entries(this.roots)) {
+      if (rootExpired(root, now)) continue;
+      for (const [keyid, key] of Object.entries(root.keys)) {
+        try {
+          candidates.push({
+            keyid,
+            publicKey: new Uint8Array(b64Decode(key.pub)),
+            publisher,
+            revoked: false,
+          });
+        } catch {
+          // Skip malformed key material.
+        }
+      }
+    }
+    return candidates;
   }
 }
