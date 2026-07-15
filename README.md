@@ -3,11 +3,12 @@
 > **Direction:** the authoritative design is [`SPEC.md`](./SPEC.md)
 > (Specification v2, 2026-07-14). Phase A (Local Seal + Claude Code plugin),
 > Phase B (signed manifests v2: DSSE envelope, `contextlock/2` format,
-> anti-rollback, root/rotation, content lints, `contextlock install`), and
+> anti-rollback, root/rotation, content lints, `contextlock install`),
 > Phase C (Sigstore keyless Profile B, reviewer multi-signatures, OpenClaw
-> adapter, CI signing recipes) are implemented. Some long-form integration
-> walkthroughs below predate v2; where they disagree with SPEC.md, SPEC.md
-> wins.
+> adapter, CI signing recipes), and Phase D (standardization drafts + nono
+> interop - proposals deliberately unsubmitted pending the go-public
+> decision) are implemented. Some long-form integration walkthroughs below
+> predate v2; where they disagree with SPEC.md, SPEC.md wins.
 
 ContextLock is a cryptographic verification system that protects AI coding tools from tampered instruction files. It verifies the authenticity and integrity of markdown artifacts — SKILL.md, CLAUDE.md, RULES.md, prompt packs, policy files — before they influence model behavior.
 
@@ -324,6 +325,19 @@ and verifiers can demand a threshold of distinct trusted keys:
 contextlock-publisher countersign ./pkg/contextlock.dsse.json --key reviewer-private.key --key-id cl-reviewer
 contextlock verify ./pkg/SKILL.md --min-signers 2
 ```
+
+**Ecosystem interop (SPEC v2 Phase D).** ContextLock can also CONSUME
+[nono](https://github.com/nolabs-ai/nono) keyless skill attestations
+(Sigstore bundle + in-toto Statement, `.nono-trust.bundle`) via
+`verifyNonoBundle` - authenticity and per-file integrity only, with an
+explicit reduced-guarantee warning (the format carries no version or expiry,
+so no anti-rollback or freeze defense). Format mapping:
+[`docs/nono-interop.md`](./docs/nono-interop.md). Standardization drafts
+(agentskills.io integrity extension, upstream hook asks, transparency-log
+design) live in [`docs/proposals/`](./docs/proposals/) and
+[`docs/transparency-log-exploration.md`](./docs/transparency-log-exploration.md) -
+written submission-ready but not submitted (going public is a separate
+decision).
 
 ### Policy Levels
 

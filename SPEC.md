@@ -325,7 +325,7 @@ Between February and June 2026 this space went from empty to three implementatio
 
 | Project | What it is | Relationship |
 |---------|-----------|--------------|
-| **nono skills attestation** (Luke Hinds, Sigstore's creator) | DSSE + in-toto + Sigstore bundles for SKILL.md/CLAUDE.md, trust-policy.json, runtime-coupled to the nono sandbox (Rust) | Closest prior art. **Align, don't compete**: same envelope, compatible policy shape. ContextLock's difference: vendor-neutral spec + TS reference implementation, not tied to a sandbox runtime |
+| **nono skills attestation** (Luke Hinds, Sigstore's creator) | DSSE + in-toto + Sigstore bundles for SKILL.md/CLAUDE.md, trust-policy.json, runtime-coupled to the nono sandbox (Rust) | Closest prior art. **Align, don't compete**: same envelope, compatible policy shape. ContextLock's difference: vendor-neutral spec + TS reference implementation, not tied to a sandbox runtime. Phase D shipped read-compat (ContextLock verifies nono keyless attestations, reduced-guarantee labeled) - full mapping in `docs/nono-interop.md` |
 | **NVIDIA Verified Agent Skills** | OMS/X.509 detached signatures, NVIDIA as sole root, catalog-centric | Validates demand; single-publisher model is the opposite of an open trust store |
 | **SkillSeal** (mcyork) | GPG/SSH signing CLI + a Claude Code PreToolUse hook, beta, one maintainer | Validates hook-based enforcement and reviewer attestations; ad-hoc envelope, no spec |
 | **ETDI** (arXiv 2506.01333) | Signed MCP tool definitions + OAuth policy | Adjacent layer (tools, not instruction files); cite as the analogue |
@@ -380,8 +380,12 @@ Sigstore Profile B (bundle verification against pinned trusted root), OpenClaw a
 - OpenClaw adapter: Layer 1 = `security.installPolicy` gate, Layer 2 = `before_agent_run` hard block, Layer 3 = `before_tool_call` write/read deny; there is NO verify-before-context-injection hook in OpenClaw, and no managed tier (openclaw.json itself joins the sealed set). Full surface mapping: `docs/openclaw-surface.md`.
 - OPEN validation items: (1) OpenClaw hook payload field names and the installPolicy stdin/stdout schema need live-gateway verification; (2) the Profile B keyless-signing recipe (`recipes/github-actions/`) follows the sigstore-js API but has not been executed with real OIDC.
 
-**Phase D - Standardization.**
-Integrity-extension proposal to the agentskills.io spec; interop tests against nono's attestation format; transparency-log / timestamp exploration (the honest fix for 6.4); upstream conversations about signed plugins in host tools.
+**Phase D - Standardization. DRAFTED + IMPLEMENTED 2026-07-15; every outward-facing step is deliberately UNSUBMITTED pending the go-public decision (section 12).**
+
+- agentskills.io proposal: drafted as a post into their EXISTING discussion #393 plus a comment on PR #254 (`docs/proposals/agentskills-integrity-extension.md`) - their repo's enforced process routes proposals to Discussions, three prior integrity RFCs were closed/converted, the reference validator hard-rejects new top-level frontmatter fields, and sidecar files are already spec-legal ("any additional files or directories"), so ContextLock's existing sidecar shape needs no spec change to be conformant.
+- nono interop: read-compat implemented and tested (`core/intoto.ts`, `verifyNonoBundle`; nono-shaped fixture; `docs/nono-interop.md` has the full format mapping). ContextLock consumes nono keyless skill attestations with an explicit reduced-guarantee warning (their format has no version/expiry/length, so no T7/T8 coverage). Keyed-mode interop is blocked on nono being ECDSA P-256-only; nono consuming ContextLock is impossible today (four hard gates) - the realistic path is a nono-native emission target (Phase E candidate). OQ3's bare-payload decision is REAFFIRMED by these tests: nono also hard-rejects foreign predicateTypes, so payload unification would not have bought interop.
+- Transparency log / timestamps: explored with a recommendation (`docs/transparency-log-exploration.md`) - RFC3161 TSA countersignature + Rekor logging for Profile A, carried in the Sigstore bundle format (converging both profiles on one evidence carrier); TUF timestamp role stays deferred until a registry exists.
+- Upstream asks: drafted ready-to-file issues (`docs/proposals/upstream-hooks-asks.md`) - Claude Code PreContextLoad hook + install verification/signed plugins; OpenClaw skill-load gate (RFC #10890 follow-up) + managed config tier.
 
 ## 15. Open questions
 
@@ -393,6 +397,7 @@ Carried forward, now with owners in the process rather than rhetorical status:
 4. Quarantine UX: move-aside + placeholder vs rename-in-place - Phase A usability test.
 5. Seal-store scaling (JSON vs SQLite) once seals exceed ~10^3 files - defer until real.
 6. Phase C follow-ups (2026-07-15): live-gateway verification of the OpenClaw hook payloads and installPolicy schema; CI execution of the Profile B keyless recipe; OpenClaw plugin packaging + distribution (bootstrap question, 7.3 applies); trusted-root update cadence for the shipped Sigstore root (currently a pinned snapshot - releases must refresh it, and a TUF-updater integration is the honest long-term fix, pairs with the 6.4 transparency-log work).
+7. Phase D follow-ups (2026-07-15): SUBMISSION of the drafted proposals and the nono alignment conversation - all gated on going public (section 12: trademark search still open). Golden vector from a real nono CI run (mock-CA fixture cannot cover their exact Rekor serialization). nono-native emission target + optional P-256 signing (keyed interop prerequisite) as Phase E candidates. Engine tier for reduced-guarantee in-toto evidence (an `attested`-class status distinct from `trusted`) - decide only on real demand. Transparency-log implementation per `docs/transparency-log-exploration.md` (Phase E candidate).
 
 ---
 
