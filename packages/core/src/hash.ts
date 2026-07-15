@@ -17,12 +17,26 @@ export function sha256Bytes(data: Buffer): Buffer {
 }
 
 /**
- * Reads a file, canonicalizes its content, then computes SHA-256 (lowercase hex).
+ * Reads a file and computes SHA-256 over its EXACT bytes on disk (lowercase hex).
+ *
+ * SPEC v2 6.1: no canonicalization at verify time. Two byte streams that hash
+ * identically only after normalization are a smuggling channel, so the thing we
+ * attest must be the thing the model reads. Publishers/seal normalize at WRITE
+ * time (normalizeFileOnDisk) and then hash the resulting raw bytes.
  */
 export async function computeFileHash(filePath: string): Promise<string> {
   const raw = await readFile(filePath);
-  const canonical = canonicalize(raw);
-  return sha256(canonical);
+  return sha256(raw);
+}
+
+/**
+ * Verify-time DIAGNOSTIC ONLY: SHA-256 of the LF-normalized content. Never used
+ * as a verdict input; only to detect a line-endings-only difference so the error
+ * message can hint "difference is line endings only" (SPEC v2 6.1).
+ */
+export async function computeNormalizedFileHash(filePath: string): Promise<string> {
+  const raw = await readFile(filePath);
+  return sha256(canonicalize(raw));
 }
 
 /**

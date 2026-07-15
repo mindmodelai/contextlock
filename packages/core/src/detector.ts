@@ -1,5 +1,5 @@
 /**
- * Protected File Detector — matches file paths against glob patterns.
+ * Protected File Detector - matches file paths against glob patterns.
  * Requirements: 6.1, 6.2, 6.3, 6.4
  */
 
@@ -8,12 +8,14 @@ import { readdir, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 /**
- * Default glob patterns for protected files.
+ * Default glob patterns for protected files (SPEC v2 section 10 file classes).
  */
 export const DEFAULT_PATTERNS: string[] = [
   "**/SKILL.md",
   "**/CLAUDE.md",
+  "**/AGENTS.md",
   "**/RULES.md",
+  "**/.claude/rules/*.md",
   "**/*.prompt.md",
   "**/*.policy.md",
 ];

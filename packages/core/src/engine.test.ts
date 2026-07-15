@@ -9,7 +9,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { VerificationEngine } from "./engine.js";
 import { sha256 } from "./hash.js";
-import { canonicalize } from "./canonicalize.js";
 import { serializeManifest, serializeSignature } from "./manifest.js";
 import type { Manifest, DetachedSignature } from "./manifest.js";
 import type { TrustStoreData } from "./trust-store.js";
@@ -54,8 +53,8 @@ async function writeSignedManifest(opts: {
   expiresAt?: string;
   revocationStatus?: string;
 }): Promise<void> {
-  const canonical = canonicalize(Buffer.from(opts.fileContent, "utf-8"));
-  const fileHash = sha256(canonical);
+  // SPEC v2 6.1: manifests attest the exact bytes on disk.
+  const fileHash = sha256(Buffer.from(opts.fileContent, "utf-8"));
 
   const manifest: Manifest = {
     schema: "tcv-manifest/v1",

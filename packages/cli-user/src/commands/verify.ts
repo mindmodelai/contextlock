@@ -1,5 +1,5 @@
 /**
- * verify command — Verify a protected file through the full verification flow.
+ * verify command - Verify a protected file through the full verification flow.
  * Falls back to filename-hash check when no manifest is found.
  * Requirements: 14.1, 14.2, 14.3, 14.4, 14.5, 16.1, 16.2, 16.3, 16.4
  */
@@ -37,30 +37,43 @@ function formatResult(
   let line: string;
   switch (result.status) {
     case "trusted":
-      line = `✓ ${name} — trusted (publisher: ${result.publisher}, key: ${result.keyId})`;
+      line = `✓ ${name} - trusted (publisher: ${result.publisher}, key: ${result.keyId})`;
       if (result.warning) line += ` [warning: ${result.warning}]`;
       break;
+    case "sealed":
+      line = `✓ ${name} - sealed (local trust-on-first-use, sealed_at: ${result.sealedAt})`;
+      break;
+    case "sealed+trusted":
+      line = `✓ ${name} - sealed+trusted (publisher: ${result.publisher}, key: ${result.keyId})`;
+      break;
     case "modified":
-      line = `✗ ${name} — modified (expected: ${result.expectedHash}, computed: ${result.fileHash})`;
+      line = `✗ ${name} - modified (expected: ${result.expectedHash}, computed: ${result.fileHash})`;
+      if (result.reason) line += ` [${result.reason}]`;
       break;
     case "untrusted":
-      line = `✗ ${name} — untrusted (${result.reason})`;
+      line = `✗ ${name} - untrusted (${result.reason})`;
       break;
     case "revoked":
-      line = `✗ ${name} — revoked (key: ${result.keyId})`;
+      line = `✗ ${name} - revoked (key: ${result.keyId})`;
       break;
     case "expired":
-      line = `✗ ${name} — expired (expires_at: ${result.expiresAt})`;
+      line = `✗ ${name} - expired (expires_at: ${result.expiresAt})`;
+      break;
+    case "seal-store-unavailable":
+      line = `✗ ${name} - seal store unavailable: possible tampering (${result.reason})`;
       break;
     case "error":
-      line = `✗ ${name} — error (${result.reason})`;
+      line = `✗ ${name} - error (${result.reason})`;
+      break;
+    default:
+      line = `✗ ${name} - ${result.status}`;
       break;
   }
 
   // Append filename-hash info when relevant
   if (filenameHash?.hasEmbeddedHash) {
     if (filenameHash.matches) {
-      line += `\n  ℹ filename hash matches (advisory — does not prove publisher identity)`;
+      line += `\n  ℹ filename hash matches (advisory - does not prove publisher identity)`;
     } else {
       line += `\n  ⚠ filename hash MISMATCH (embedded: ${filenameHash.embeddedHash}, computed: ${filenameHash.computedHashPrefix})`;
     }
@@ -99,7 +112,7 @@ export async function userVerify(options: UserVerifyOptions): Promise<UserVerify
   try {
     filenameHash = await verifyFilenameHash(absPath);
   } catch {
-    // File might not exist or be unreadable — skip
+    // File might not exist or be unreadable - skip
   }
 
   const displayMessage = formatResult(filePath, result, filenameHash);

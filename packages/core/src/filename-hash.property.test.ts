@@ -7,7 +7,6 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { extractFilenameHash, verifyFilenameHash } from "./filename-hash.js";
-import { canonicalize } from "./canonicalize.js";
 import { sha256 } from "./hash.js";
 
 // ---- Shared temp directory ----
@@ -73,9 +72,8 @@ describe("Property 16: Filename hash extraction and verification", () => {
 
     await fc.assert(
       fc.asyncProperty(nameArb, extArb, contentArb, async (name, ext, content) => {
-        // Compute the real hash of the content
-        const canonical = canonicalize(Buffer.from(content, "utf-8"));
-        const fullHash = sha256(canonical);
+        // Compute the real hash of the EXACT bytes (SPEC v2 6.1)
+        const fullHash = sha256(Buffer.from(content, "utf-8"));
         // Use first 8 chars as the embedded hash
         const hashPrefix = fullHash.substring(0, 8);
 

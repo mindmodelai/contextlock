@@ -1,6 +1,12 @@
 /**
- * Verification Engine — orchestrates the full TCV verification flow.
- * Requirements: 2.1, 3.1–3.6, 4.1–4.4, 6.4, 8.1–8.3, 9.2–9.4, 18.1–18.6
+ * Verification Engine - orchestrates the full ContextLock verification flow.
+ *
+ * SPEC v2: consults TWO evidence sources for every file:
+ *   - the machine-local SEAL store (Mode 0, trust-on-first-use), and
+ *   - the signed MANIFEST chain (Mode 2, publisher trust, existing v1 logic).
+ *
+ * Hashing is over the EXACT bytes on disk (SPEC v2 6.1); canonicalization is
+ * used only as a line-endings-only diagnostic on a mismatch.
  */
 
 import { readFile } from "node:fs/promises";
@@ -16,6 +22,7 @@ import { verifySignature } from "./signature.js";
 import { TrustStore } from "./trust-store.js";
 import { sha256 } from "./hash.js";
 import { canonicalize } from "./canonicalize.js";
+import { SealStore } from "./seal.js";
 import { isProtectedFile } from "./detector.js";
 import type { PolicyLevel } from "./policy.js";
 
@@ -23,11 +30,14 @@ import type { PolicyLevel } from "./policy.js";
 
 export type VerificationStatus =
   | "trusted"
+  | "sealed"
+  | "sealed+trusted"
   | "modified"
   | "untrusted"
   | "revoked"
   | "expired"
-  | "error";
+  | "error"
+  | "seal-store-unavailable";
 
 export interface VerificationResult {
   status: VerificationStatus;
@@ -39,6 +49,8 @@ export interface VerificationResult {
   reason?: string;
   expiresAt?: string;
   warning?: string;
+  /** Seal timestamp when the verdict rests on a local seal. */
+  sealedAt?: string;
 }
 
 export interface VerificationEngineConfig {
@@ -46,12 +58,17 @@ export interface VerificationEngineConfig {
   cachePath: string;
   protectedPatterns: string[];
   policyLevel: PolicyLevel;
+  /** Optional override for the seal store path. Defaults to CONTEXTLOCK_HOME/seals.json. */
+  sealStorePath?: string;
 }
 
 // ---- Helpers ----
 
 const MANIFEST_FILENAME = "manifest.json";
 const SIGNATURE_FILENAME = "manifest.sig.json";
+
+const LINE_ENDINGS_HINT =
+  "difference is line endings only (CRLF vs LF); re-seal or restore LF endings";
 
 /**
  * Walk up from `startDir` looking for manifest.json + manifest.sig.json.
@@ -69,7 +86,7 @@ async function locateManifestDir(startDir: string): Promise<string | undefined> 
       await readFile(sigPath);
       return current;
     } catch {
-      // files not found in this directory — walk up
+      // files not found in this directory - walk up
     }
     const parent = dirname(current);
     if (parent === current || parent === root) {
@@ -168,7 +185,6 @@ export class VerificationEngine {
     });
 
     if (!sigResult.valid) {
-      // Map reason to appropriate status
       if (sigResult.reason === "key revoked") {
         return {
           status: "revoked",
@@ -190,7 +206,6 @@ export class VerificationEngine {
           reason: sigResult.reason,
         };
       }
-      // signature verification failed or other
       return {
         status: "untrusted",
         keyId: sigResult.keyId,
@@ -213,7 +228,6 @@ export class VerificationEngine {
     if (manifest.expires_at) {
       const expiresAt = new Date(manifest.expires_at);
       if (expiresAt.getTime() < Date.now()) {
-        // Look up publisher policy for allow_expired_manifest
         const publisherEntry = trustStore.getPublisher(signature.key_id);
         const allowExpired = publisherEntry?.policy?.allow_expired_manifest ?? false;
 
@@ -225,7 +239,6 @@ export class VerificationEngine {
             publisher: sigResult.publisher,
           };
         }
-        // Expired but allowed — return trusted with warning
         return {
           status: "trusted",
           publisher: sigResult.publisher,
@@ -236,7 +249,6 @@ export class VerificationEngine {
       }
     }
 
-    // Manifest-level verification passed
     return {
       status: "trusted",
       publisher: sigResult.publisher,
@@ -246,17 +258,78 @@ export class VerificationEngine {
   }
 
   /**
-   * Full verification flow for a single file.
+   * Full verification flow for a single file, combining seal + manifest evidence.
    *
-   * Steps:
-   * 1. Locate manifest.json + manifest.sig.json by walking up from the file's directory
-   * 2. Parse & validate manifest and signature
-   * 3. Load trust store, verify signature
-   * 4. Check revocation, expiry
-   * 5. Canonicalize file, compute hash, compare with manifest entry
+   * Combination rules (SPEC v2 5):
+   *   seal ok + no manifest     -> sealed
+   *   seal ok + manifest trusted-> sealed+trusted
+   *   seal mismatch             -> modified  (seal wins: the user pinned it)
+   *   no seal + manifest trusted-> trusted
+   *   seal store unavailable    -> seal-store-unavailable (fail closed)
+   *   otherwise                 -> the manifest verdict (untrusted/modified/...)
    */
   async verify(filePath: string): Promise<VerificationResult> {
     const absPath = resolve(filePath);
+
+    // 1. Seal evidence (Mode 0). A corrupt/tampered store fails closed for
+    //    every file rather than silently reporting "unsealed".
+    const sealStore = new SealStore(this.config.sealStorePath);
+    await sealStore.load();
+    const sealVerdict = await sealStore.verifySeal(absPath);
+
+    if (sealVerdict.status === "store-unavailable") {
+      return {
+        status: "seal-store-unavailable",
+        reason:
+          sealVerdict.reason ??
+          "seal store unavailable: possible tampering (treat as unverifiable)",
+      };
+    }
+
+    // Seal mismatch wins over any manifest verdict: the user explicitly pinned
+    // these bytes, so a change is a violation regardless of publisher status.
+    if (sealVerdict.status === "seal-modified") {
+      const reason = sealVerdict.lineEndingsOnly
+        ? `sealed content modified; ${LINE_ENDINGS_HINT}`
+        : "sealed content modified since it was sealed";
+      return {
+        status: "modified",
+        expectedHash: sealVerdict.expectedHash,
+        fileHash: sealVerdict.actualHash,
+        reason,
+        sealedAt: sealVerdict.sealedAt,
+      };
+    }
+
+    // 2. Manifest evidence (Mode 2).
+    const manifestResult = await this.verifyViaManifest(absPath);
+
+    // 3. Combine.
+    if (sealVerdict.status === "sealed") {
+      if (manifestResult.status === "trusted") {
+        return { ...manifestResult, status: "sealed+trusted", sealedAt: sealVerdict.sealedAt };
+      }
+      return {
+        status: "sealed",
+        fileHash: sealVerdict.actualHash,
+        expectedHash: sealVerdict.expectedHash,
+        sealedAt: sealVerdict.sealedAt,
+        reason: sealVerdict.note
+          ? `sealed via local trust-on-first-use (${sealVerdict.note})`
+          : "sealed via local trust-on-first-use",
+      };
+    }
+
+    // Unsealed: the manifest verdict stands.
+    return manifestResult;
+  }
+
+  /**
+   * Manifest-chain verification for a single file. Hashes exact bytes on disk.
+   * On a hash mismatch, computes the LF-normalized hash purely to append a
+   * line-endings-only diagnostic (verdict stays `modified`).
+   */
+  private async verifyViaManifest(absPath: string): Promise<VerificationResult> {
     const fileDir = dirname(absPath);
 
     // 1. Locate manifest directory
@@ -387,7 +460,7 @@ export class VerificationEngine {
       }
     }
 
-    // 9. Canonicalize file content and compute hash
+    // 9. Read file and hash EXACT bytes on disk (SPEC v2 6.1)
     let fileContent: Buffer;
     try {
       fileContent = await readFile(absPath);
@@ -395,8 +468,7 @@ export class VerificationEngine {
       return { status: "error", reason: `cannot read file: ${(e as Error).message}` };
     }
 
-    const canonical = canonicalize(fileContent);
-    const fileHash = sha256(canonical);
+    const fileHash = sha256(fileContent);
 
     // 10. Find file entry in manifest by relative path
     const relPath = relative(manifestDir, absPath).replace(/\\/g, "/");
@@ -423,13 +495,20 @@ export class VerificationEngine {
       return result;
     }
 
-    // Hash mismatch
+    // Hash mismatch. Compute the LF-normalized hash purely for diagnostics.
+    const normalizedHash = sha256(canonicalize(fileContent));
+    const reason =
+      normalizedHash === entry.sha256
+        ? `file modified since signing; ${LINE_ENDINGS_HINT}`
+        : "file modified since signing";
+
     return {
       status: "modified",
       fileHash,
       expectedHash: entry.sha256,
       publisher: sigResult.publisher,
       keyId: sigResult.keyId,
+      reason,
     };
   }
 }

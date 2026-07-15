@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "Node16",
-    "moduleResolution": "Node16",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "declaration": true,
     "declarationMap": true,
@@ -16,5 +16,13 @@
     "resolveJsonModule": true,
     "composite": true
   },
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/cli-publisher" },
+    { "path": "packages/cli-user" },
+    { "path": "packages/adapter-claude-code" },
+    { "path": "packages/adapter-openclaw" }
+  ],
   "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }

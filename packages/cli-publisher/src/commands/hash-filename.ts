@@ -1,5 +1,5 @@
 /**
- * hash-filename command — Produce a hash-protected copy of a file.
+ * hash-filename command - Produce a hash-protected copy of a file.
  *
  * Renames (or copies) a file to embed a truncated SHA-256 hash in the filename:
  *   SKILL.md → SKILL.a3f5c9e8d1f24a6c.md
@@ -11,13 +11,13 @@
 
 import { readFile, writeFile, copyFile } from "node:fs/promises";
 import { join, dirname, basename, extname } from "node:path";
-import { canonicalize, sha256 } from "@contextlock/core";
+import { sha256 } from "@contextlock/core";
 
 export interface HashFilenameOptions {
   filePath: string;
   /** Number of hex characters to embed (default: 16). Min 4, max 64. */
   hashLength?: number;
-  /** If true, copy instead of rename — keeps the original file. */
+  /** If true, copy instead of rename - keeps the original file. */
   copy?: boolean;
   /** Output directory. Defaults to same directory as the source file. */
   outputDir?: string;
@@ -31,18 +31,18 @@ export interface HashFilenameResult {
 }
 
 /**
- * Reads a file, computes its canonicalized SHA-256, and writes a copy
- * with the hash embedded in the filename.
+ * Reads a file, computes the SHA-256 of its EXACT bytes (SPEC v2 6.1: the
+ * "change hint" must reflect the on-disk bytes the verifier hashes), and writes
+ * a copy with the truncated hash embedded in the filename.
  */
 export async function hashFilename(options: HashFilenameOptions): Promise<HashFilenameResult> {
   const { filePath, hashLength = 16, copy: keepOriginal = true, outputDir } = options;
 
   const len = Math.max(4, Math.min(64, hashLength));
 
-  // Read and hash
+  // Read and hash exact bytes on disk
   const raw = await readFile(filePath);
-  const canonical = canonicalize(raw);
-  const fullHash = sha256(canonical);
+  const fullHash = sha256(raw);
   const embeddedHash = fullHash.substring(0, len);
 
   // Build new filename: name.hash.ext
@@ -53,7 +53,7 @@ export async function hashFilename(options: HashFilenameOptions): Promise<HashFi
   const hashedPath = join(dir, newName);
 
   if (keepOriginal) {
-    // Copy the original content (not canonicalized — preserve original bytes)
+    // Copy the original content (not canonicalized - preserve original bytes)
     await copyFile(filePath, hashedPath);
   } else {
     // Write canonicalized content to new path

@@ -16,6 +16,7 @@ export default defineConfig({
       "packages/*/src/**/*.test.ts",
       "tests/**/*.test.ts",
     ],
+    setupFiles: [resolve(__dirname, "tests/setup.ts")],
     testTimeout: 30000,
   },
 });

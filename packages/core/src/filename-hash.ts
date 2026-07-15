@@ -1,14 +1,13 @@
 /**
- * Filename Hash Extractor — extracts and verifies embedded filename hashes.
+ * Filename Hash Extractor - extracts and verifies embedded filename hashes.
  * Requirements: 16.1, 16.2, 16.3, 16.4
  *
  * Pattern: <name>.<hex-hash>.<ext>
- * Filename hash is advisory only — never produces `trusted` status.
+ * Filename hash is advisory only - never produces `trusted` status.
  */
 
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
-import { canonicalize } from "./canonicalize.js";
 import { sha256 } from "./hash.js";
 
 export interface FilenameHashResult {
@@ -38,8 +37,9 @@ export function extractFilenameHash(filename: string): string | null {
 }
 
 /**
- * Verifies the embedded filename hash against the computed SHA-256 of the
- * canonicalized file content. Filename hash alone never produces `trusted` status.
+ * Verifies the embedded filename hash against the SHA-256 of the EXACT file
+ * bytes on disk (SPEC v2 6.1: no canonicalization at verify time). Filename
+ * hash is a "change hint" only (SPEC v2 Mode 1) and never produces `trusted`.
  */
 export async function verifyFilenameHash(filePath: string): Promise<FilenameHashResult> {
   const embeddedHash = extractFilenameHash(filePath);
@@ -48,8 +48,7 @@ export async function verifyFilenameHash(filePath: string): Promise<FilenameHash
   }
 
   const raw = await readFile(filePath);
-  const canonical = canonicalize(raw);
-  const fullHash = sha256(canonical);
+  const fullHash = sha256(raw);
   const prefix = fullHash.substring(0, embeddedHash.length);
 
   return {

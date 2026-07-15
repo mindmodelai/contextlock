@@ -1,11 +1,35 @@
-// @contextlock/core — Shared verification engine
+// @contextlock/core - Shared verification engine
 // Barrel file: re-exports all public APIs
 
-// Canonicalizer
-export { canonicalize } from "./canonicalize.js";
+// Canonicalizer (write-path normalization + verify-time diagnostic)
+export { canonicalize, normalizeContent, normalizeFileOnDisk } from "./canonicalize.js";
 
 // Hasher
-export { sha256, sha256Bytes, computeFileHash, computeFingerprint } from "./hash.js";
+export {
+  sha256,
+  sha256Bytes,
+  computeFileHash,
+  computeNormalizedFileHash,
+  computeFingerprint,
+} from "./hash.js";
+
+// Machine-local key + ContextLock home (SPEC v2 5, 8)
+export {
+  contextlockHome,
+  localKeyPath,
+  ensureContextlockHome,
+  loadOrCreateLocalKey,
+  signWithLocalKey,
+  verifyWithLocalKey,
+  canonicalJson,
+  base64urlEncode,
+  base64urlDecode,
+} from "./localkey.js";
+export type { LocalKey } from "./localkey.js";
+
+// Seal store (Mode 0: local TOFU)
+export { SealStore, SEAL_STORE_SPEC } from "./seal.js";
+export type { SealEntry, SealVerdict, SealStatus } from "./seal.js";
 
 // Manifest Parser
 export {
@@ -61,7 +85,7 @@ export { ManifestCache } from "./cache.js";
 export type { CacheEntry } from "./cache.js";
 
 // Verification Engine
-// engine.ts also exports VerificationStatus (identical type) — alias it to avoid conflict.
+// engine.ts also exports VerificationStatus (identical type) - alias it to avoid conflict.
 export { VerificationEngine } from "./engine.js";
 export { VerificationStatus as EngineVerificationStatus } from "./engine.js";
 export type {

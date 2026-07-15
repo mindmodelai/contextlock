@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * @contextlock/cli-publisher — Publisher CLI entry point.
+ * @contextlock/cli-publisher - Publisher CLI entry point.
  * Requirements: 10, 11, 12, 19, 20
  */
 
@@ -26,11 +26,16 @@ export { protect } from "./commands/protect.js";
 export type { ProtectOptions, ProtectResult, ProtectMode } from "./commands/protect.js";
 
 /**
- * CLI command routing — parses process.argv and dispatches to command functions.
+ * CLI command routing - parses process.argv and dispatches to command functions.
  */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0];
+
+  const get = (flag: string) => {
+    const i = args.indexOf(flag);
+    return i !== -1 ? args[i + 1] : "";
+  };
 
   switch (command) {
     case "init-key": {
@@ -51,10 +56,6 @@ async function main(): Promise<void> {
         console.error("Usage: tcv-publisher build-manifest <dir> --name <pkg> --version <ver> --publisher <name> --key-id <id> --fingerprint <fp>");
         process.exit(1);
       }
-      const get = (flag: string) => {
-        const i = args.indexOf(flag);
-        return i !== -1 ? args[i + 1] : "";
-      };
       const { buildManifest: run } = await import("./commands/build-manifest.js");
       const result = await run({
         directory: dir,
