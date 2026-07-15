@@ -8,7 +8,8 @@
     "packages/cli-publisher",
     "packages/cli-user",
     "packages/adapter-claude-code",
-    "packages/adapter-openclaw"
+    "packages/adapter-openclaw",
+    "packages/plugin-claude-code"
   ],
   "scripts": {
     "test": "vitest --run",

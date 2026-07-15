@@ -1,0 +1,14 @@
+{
+  "name": "contextlock-plugins",
+  "owner": {
+    "name": "Mind Model AI",
+    "url": "https://contextlock.net"
+  },
+  "plugins": [
+    {
+      "name": "contextlock",
+      "source": "./",
+      "description": "Authenticity and integrity verification for AI instruction files, enforced in Claude Code via SessionStart sweep and PreToolUse denial."
+    }
+  ]
+}

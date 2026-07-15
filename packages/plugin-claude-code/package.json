@@ -1,0 +1,17 @@
+{
+  "name": "@contextlock/plugin-claude-code",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ContextLock plugin for Claude Code - SessionStart verification sweep, PreToolUse denial on tampered instruction files, and self-protection deny-rule templates.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest --run hook.test"
+  },
+  "dependencies": {
+    "@contextlock/cli-user": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "vitest": "^3.2.1"
+  }
+}

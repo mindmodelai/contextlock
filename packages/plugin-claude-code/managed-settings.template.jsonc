@@ -1,0 +1,103 @@
+// ContextLock - managed settings template (Layer 4: managed policy).
+//
+// This file is a TEMPLATE. To deploy it, remove these comments (or keep them if
+// your Claude Code build accepts JSONC) and copy the result to the managed
+// settings path for the OS, which only an administrator can write:
+//
+//   macOS:        /Library/Application Support/ClaudeCode/managed-settings.json
+//   Linux / WSL:  /etc/claude-code/managed-settings.json
+//   Windows:      C:\Program Files\ClaudeCode\managed-settings.json
+//
+// Managed settings cannot be overridden or removed by project (.claude/
+// settings.json) or user (~/.claude/settings.json) settings. That is the whole
+// point: it is the anchor an injected agent (running at user privilege inside
+// the tool) cannot reach. Disabling ContextLock now requires OS-admin
+// privilege, not just write access to a repo the agent is editing.
+{
+  // allowManagedPermissionRulesOnly makes the deny/allow/ask rules below the
+  // ONLY permission rules Claude Code evaluates. A repo-controlled
+  // .claude/settings.json cannot add an `allow` rule to re-enable writes to a
+  // protected path. This directly neutralizes the CVE-2025-59536 /
+  // CVE-2026-21852 class, where a checked-in config file silently widens
+  // permissions or unregisters verification.
+  "allowManagedPermissionRulesOnly": true,
+
+  "permissions": {
+    "deny": [
+      // ContextLock's own state: the seal store, the machine-local signing
+      // key, and the trust store. If the agent could write here it could
+      // re-seal a file it just tampered with, defeating T2 (prompt-injection
+      // persistence). Deny both Edit and Write.
+      "Edit(~/.contextlock/**)",
+      "Write(~/.contextlock/**)",
+
+      // User-scope agent memory. ~/.claude/CLAUDE.md steers every session with
+      // near-system-prompt privilege and has no load-time verification hook,
+      // so write-deny is its primary control. Seal it, then deny writes.
+      "Edit(~/.claude/CLAUDE.md)",
+      "Write(~/.claude/CLAUDE.md)",
+
+      // The settings files that register hooks. If the agent can rewrite these
+      // it can unregister the ContextLock hooks themselves. Deny at user and
+      // project scope. (Managed settings above still win regardless.)
+      "Edit(~/.claude/settings.json)",
+      "Write(~/.claude/settings.json)",
+      "Edit(~/.claude/settings.local.json)",
+      "Write(~/.claude/settings.local.json)",
+      "Edit(./.claude/settings.json)",
+      "Write(./.claude/settings.json)",
+      "Edit(./.claude/settings.local.json)",
+      "Write(./.claude/settings.local.json)",
+
+      // Hook / agent / MCP config files - the config-CVE class. These are
+      // executable-in-effect and must not be rewritten by the agent it steers.
+      // Extend this list to match your project's protected-class patterns.
+      "Edit(./.mcp.json)",
+      "Write(./.mcp.json)",
+      "Edit(./.claude/hooks/**)",
+      "Write(./.claude/hooks/**)"
+    ]
+  },
+
+  // The same hooks the plugin ships, registered at managed scope so they run
+  // even if the plugin is not installed and cannot be disabled by user/project
+  // settings. These call the ContextLock CLI hook entry points directly, so the
+  // `contextlock` binary must be installed system-wide and on PATH. If it is
+  // not on PATH, replace `contextlock` with an absolute node invocation, e.g.
+  // "node /opt/contextlock/packages/cli-user/bin/contextlock.mjs hook session-start".
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "contextlock hook session-start",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "contextlock hook pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "contextlock hook pre-tool-use",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "contextlock",
+  "displayName": "ContextLock",
+  "version": "0.1.0",
+  "description": "Verifies the authenticity and integrity of AI instruction files (CLAUDE.md, SKILL.md, rules, prompt packs, agent configs) before they influence Claude. Session-start sweep, pre-tool-use denial on tampered files, and self-protection deny rules.",
+  "author": {
+    "name": "Mind Model AI",
+    "url": "https://contextlock.net"
+  },
+  "homepage": "https://contextlock.net",
+  "repository": "https://github.com/mindmodelai/contextlock",
+  "keywords": [
+    "security",
+    "provenance",
+    "integrity",
+    "supply-chain",
+    "instruction-files",
+    "prompt-injection",
+    "verification"
+  ]
+}

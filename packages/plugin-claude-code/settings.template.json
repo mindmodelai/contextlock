@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(~/.contextlock/**)",
+      "Write(~/.contextlock/**)",
+      "Edit(~/.claude/CLAUDE.md)",
+      "Write(~/.claude/CLAUDE.md)",
+      "Edit(~/.claude/settings.json)",
+      "Write(~/.claude/settings.json)"
+    ]
+  }
+}
