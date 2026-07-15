@@ -1,11 +1,13 @@
 # ContextLock — Trusted Content Verification for AI Coding Tools
 
 > **Direction:** the authoritative design is [`SPEC.md`](./SPEC.md)
-> (Specification v2, 2026-07-14). Phase A (Local Seal + Claude Code plugin)
-> and Phase B (signed manifests v2: DSSE envelope, `contextlock/2` format,
-> anti-rollback, root/rotation, content lints, `contextlock install`) are
-> implemented. Some long-form integration walkthroughs below predate v2; where
-> they disagree with SPEC.md, SPEC.md wins.
+> (Specification v2, 2026-07-14). Phase A (Local Seal + Claude Code plugin),
+> Phase B (signed manifests v2: DSSE envelope, `contextlock/2` format,
+> anti-rollback, root/rotation, content lints, `contextlock install`), and
+> Phase C (Sigstore keyless Profile B, reviewer multi-signatures, OpenClaw
+> adapter, CI signing recipes) are implemented. Some long-form integration
+> walkthroughs below predate v2; where they disagree with SPEC.md, SPEC.md
+> wins.
 
 ContextLock is a cryptographic verification system that protects AI coding tools from tampered instruction files. It verifies the authenticity and integrity of markdown artifacts — SKILL.md, CLAUDE.md, RULES.md, prompt packs, policy files — before they influence model behavior.
 
@@ -34,13 +36,18 @@ The system uses:
 ```
 contextlock/
 ├── packages/
-│   ├── core/                    # Shared verification engine
-│   ├── cli-publisher/           # Publisher CLI (key gen, manifest, signing)
-│   ├── cli-user/                # User CLI (trust management, verification)
+│   ├── core/                    # Shared verification engine (+ pinned Sigstore trusted root in assets/)
+│   ├── cli-publisher/           # Publisher CLI (key gen, manifest, signing, countersign)
+│   ├── cli-user/                # User CLI (trust management, verification, install)
 │   ├── adapter-claude-code/     # Claude Code integration adapter
-│   └── adapter-openclaw/        # OpenClaw integration adapter
+│   ├── adapter-openclaw/        # OpenClaw adapter (installPolicy + blocking hooks)
+│   └── plugin-claude-code/      # Installable Claude Code plugin (hooks + CLI shim)
+├── recipes/
+│   └── github-actions/          # CI signing recipes (Profile A key, Profile B keyless)
+├── docs/                        # Empirical host-tool surface maps (Claude Code, OpenClaw)
 ├── tests/
-│   └── integration/             # End-to-end integration tests
+│   ├── integration/             # End-to-end, red-team, and MVP acceptance tests
+│   └── fixtures/sigstore/       # Real + synthetic Sigstore bundles and trusted roots
 ├── vitest.config.ts
 ├── tsconfig.json
 └── package.json
@@ -291,6 +298,31 @@ Root-of-trust management for publishers who rotate keys (SPEC v2 6.5):
 contextlock trust root add "Acme Security" ./contextlock.root.dsse.json     # pin initial root (TOFU)
 contextlock trust root update "Acme Security" ./root-v2.dsse.json          # verified rotation (N+1, old+new thresholds)
 contextlock trust reset "Acme Security"                                     # fast-forward recovery (clears rollback baselines)
+```
+
+**Profile B — Sigstore keyless (SPEC v2 5, Phase C).** Packages signed in CI
+carry `contextlock.sigstore.json` (a Sigstore bundle whose DSSE payload is the
+contextlock/2 manifest). No publisher key exists; users pin the CI workflow's
+OIDC identity, exactly like npm provenance, and verification is fully offline
+against the pinned Sigstore trusted root shipped with ContextLock:
+
+```bash
+contextlock trust identity add "Acme Security" \
+  --identity "https://github.com/acme/skills/.github/workflows/sign.yml@refs/heads/main" \
+  --issuer   "https://token.actions.githubusercontent.com"
+# identity accepts globs: * does not cross /, ** does
+contextlock verify ./downloads/acme-skills/SKILL.md   # engine auto-detects the bundle
+```
+
+Signing recipes for both profiles live in [`recipes/github-actions/`](./recipes/).
+
+**Reviewer multi-signatures (SPEC v2 6.2).** The DSSE envelope carries
+multiple signatures natively; a reviewer countersigns the exact payload bytes
+and verifiers can demand a threshold of distinct trusted keys:
+
+```bash
+contextlock-publisher countersign ./pkg/contextlock.dsse.json --key reviewer-private.key --key-id cl-reviewer
+contextlock verify ./pkg/SKILL.md --min-signers 2
 ```
 
 ### Policy Levels

@@ -372,8 +372,13 @@ Mode 0 end to end: seal store, machine-local key, `seal/reseal/status/sweep`, th
 **Phase B - Signed manifests v2. SHIPPED 2026-07-15.**
 DSSE envelope, `contextlock/2` manifest, anti-rollback state, root/rotation, content lints, publisher CLI updates, `contextlock install`. Acceptance: v1's five MVP criteria re-run on the v2 format (`tests/integration/mvp-v2.test.ts`), plus rollback, manifest-stripping, mix-and-match, cross-package, sidecar-differential, and keyid-spoofing red-team tests (`tests/integration/redteam-v2.test.ts`).
 
-**Phase C - Ecosystem profiles.**
-Sigstore Profile B (bundle verification against pinned trusted root), OpenClaw adapter (highest urgency given ClawHavoc), reviewer multi-signatures, CI signing recipes (GitHub Actions).
+**Phase C - Ecosystem profiles. SHIPPED 2026-07-15 (with two explicitly open validation items).**
+Sigstore Profile B (bundle verification against pinned trusted root), OpenClaw adapter (highest urgency given ClawHavoc), reviewer multi-signatures, CI signing recipes (GitHub Actions). Implementation notes:
+
+- Profile B: offline verification of `contextlock.sigstore.json` bundles via the official sigstore-js libraries against a pinned `trusted_root.json` shipped at `packages/core/assets/`; identity policy = pinned (certificate-identity glob, exact issuer) pairs (`contextlock trust identity add`); anti-rollback keyed by sha256(issuer, SAN). Tested against a REAL npm-provenance bundle (production trusted root, full thresholds) and a SYNTHETIC contextlock-manifest bundle generated with @sigstore/mock (mock Fulcio CA + CT log + RFC3161 TSA, `tlogThreshold: 0`; regenerate with `scripts/generate-sigstore-fixture.mjs`).
+- Reviewer multi-signatures: `contextlock-publisher countersign` appends a signature over the exact payload bytes; verification collects every distinct trusted key; `requiredSigners` / `verify --min-signers N` enforces the threshold. Rollback state is checked and recorded against EVERY verified signer.
+- OpenClaw adapter: Layer 1 = `security.installPolicy` gate, Layer 2 = `before_agent_run` hard block, Layer 3 = `before_tool_call` write/read deny; there is NO verify-before-context-injection hook in OpenClaw, and no managed tier (openclaw.json itself joins the sealed set). Full surface mapping: `docs/openclaw-surface.md`.
+- OPEN validation items: (1) OpenClaw hook payload field names and the installPolicy stdin/stdout schema need live-gateway verification; (2) the Profile B keyless-signing recipe (`recipes/github-actions/`) follows the sigstore-js API but has not been executed with real OIDC.
 
 **Phase D - Standardization.**
 Integrity-extension proposal to the agentskills.io spec; interop tests against nono's attestation format; transparency-log / timestamp exploration (the honest fix for 6.4); upstream conversations about signed plugins in host tools.
@@ -387,6 +392,7 @@ Carried forward, now with owners in the process rather than rhetorical status:
 3. ~~Sign in-toto Statements vs bare manifest payload~~ Resolved in Phase B (2026-07-15): **bare manifest payload** with the dedicated payloadType, as normatively specified in 6.2/6.3. Rationale: (a) an in-toto Statement duplicates the file list in `subject`, creating a second authority that must be cross-validated against the predicate - new attack surface for zero security gain; (b) the DSSE payloadType makes the formats cleanly distinguishable, so a Statement profile can be ADDED later without breaking existing verifiers (old verifiers reject the unknown payloadType loudly, never silently); (c) the natural home for Statement interop is Phase C's Sigstore Profile B, where bundles carry Statements natively and nono compatibility can be tested against a real counterparty rather than guessed at. This resolution reverses the earlier "leaning Statement" note - revisit at Phase C with concrete nono interop tests.
 4. Quarantine UX: move-aside + placeholder vs rename-in-place - Phase A usability test.
 5. Seal-store scaling (JSON vs SQLite) once seals exceed ~10^3 files - defer until real.
+6. Phase C follow-ups (2026-07-15): live-gateway verification of the OpenClaw hook payloads and installPolicy schema; CI execution of the Profile B keyless recipe; OpenClaw plugin packaging + distribution (bootstrap question, 7.3 applies); trusted-root update cadence for the shipped Sigstore root (currently a pinned snapshot - releases must refresh it, and a TUF-updater integration is the honest long-term fix, pairs with the 6.4 transparency-log work).
 
 ---
 

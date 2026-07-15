@@ -1,0 +1,70 @@
+# ContextLock CI signing recipe - Profile B (Sigstore keyless)
+#
+# No key to manage or leak: the workflow's OIDC identity IS the signer.
+# Users pin the identity once:
+#
+#   contextlock trust identity add "Your Name" \
+#     --identity "https://github.com/YOUR-ORG/YOUR-REPO/.github/workflows/contextlock-sign.yml@refs/heads/main" \
+#     --issuer   "https://token.actions.githubusercontent.com"
+#
+# and verification is fully offline against the pinned Sigstore trusted root
+# shipped with ContextLock. Signing requires the network (OIDC + Fulcio +
+# Rekor) - that is why Profile A remains the baseline (SPEC v2 5).
+#
+# The keyless-sign.mjs helper (in this directory) signs the manifest bytes
+# into a DSSE envelope with ContextLock's exact payloadType and emits the
+# Sigstore bundle as contextlock.sigstore.json - the Profile B evidence file.
+#
+# NOT YET CI-VALIDATED: this recipe has been reviewed against the sigstore-js
+# API but not executed in a live workflow (signing needs real OIDC). Validate
+# once before adopting; verification of the produced bundle is covered by
+# ContextLock's test suite.
+
+name: ContextLock sign (Profile B, keyless)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write   # REQUIRED: the OIDC token is the signing identity
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install CLIs
+        run: |
+          npm install -g @contextlock/cli-publisher
+          npm install sigstore
+
+      - name: Build the contextlock/2 manifest (unsigned)
+        run: |
+          contextlock-publisher build-manifest ./package-dir \
+            --name my-skill-pack \
+            --version ${{ github.run_number }} \
+            --display-version "${{ github.ref_name }}" \
+            --publisher "Your Name" \
+            --key-id "sigstore:github-actions" \
+            --expires-days 365
+
+      - name: Keyless-sign into a Sigstore bundle
+        run: |
+          node ./recipes/github-actions/keyless-sign.mjs \
+            ./package-dir/contextlock.manifest.json \
+            ./package-dir/contextlock.sigstore.json
+          rm -f ./package-dir/contextlock.manifest.json
+
+      - name: Attach the bundle to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            package-dir/contextlock.sigstore.json

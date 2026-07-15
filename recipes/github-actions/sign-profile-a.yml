@@ -1,0 +1,73 @@
+# ContextLock CI signing recipe - Profile A (raw Ed25519 repo key)
+#
+# Signs your instruction-file package on every release with a repository
+# secret key. Offline-capable verification; users pin your PUBLIC key once:
+#
+#   contextlock trust add contextlock-public.key --name "Your Name" --key-id cl-you-2026
+#
+# Setup (once):
+#   1. contextlock-publisher init-key --key-id cl-you-2026
+#   2. Add the CONTENT of contextlock-private.key as the repo secret
+#      CONTEXTLOCK_PRIVATE_KEY (Settings -> Secrets -> Actions).
+#   3. Commit contextlock-public.key (public keys are public) and publish its
+#      fingerprint through a second channel (website, README).
+#   4. Add a .gitattributes with `*.md text eol=lf` so checkouts do not undo
+#      the sign-time LF normalization (SPEC v2 6.1).
+#
+# The monotonic manifest version uses github.run_number: strictly increasing
+# per workflow, which is exactly what the anti-rollback counter needs.
+
+name: ContextLock sign (Profile A)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install ContextLock publisher CLI
+        run: npm install -g @contextlock/cli-publisher
+
+      - name: Write signing key from secret
+        env:
+          CONTEXTLOCK_PRIVATE_KEY: ${{ secrets.CONTEXTLOCK_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$CONTEXTLOCK_PRIVATE_KEY" > /tmp/contextlock-private.key
+
+      - name: Build and sign the manifest
+        run: |
+          contextlock-publisher protect ./package-dir \
+            --mode sign \
+            --name my-skill-pack \
+            --version ${{ github.run_number }} \
+            --display-version "${{ github.ref_name }}" \
+            --publisher "Your Name" \
+            --key /tmp/contextlock-private.key \
+            --key-id cl-you-2026 \
+            --expires-days 365
+
+      - name: Shred the key material
+        if: always()
+        run: rm -f /tmp/contextlock-private.key
+
+      - name: Pre-publish verification (signature + hashes + lints)
+        run: contextlock-publisher verify ./package-dir --pub ./contextlock-public.key
+
+      - name: Attach the envelope to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            package-dir/contextlock.dsse.json
