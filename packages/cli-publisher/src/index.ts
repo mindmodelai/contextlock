@@ -1,16 +1,24 @@
 #!/usr/bin/env node
 /**
- * @contextlock/cli-publisher - Publisher CLI entry point.
- * Requirements: 10, 11, 12, 19, 20
+ * @contextlock/cli-publisher - Publisher CLI entry point (SPEC v2 Phase B).
+ *
+ * Commands:
+ *   protect <dir> --mode sign|hash   one-shot: keys + manifest + DSSE envelope
+ *   init-key [--output <dir>] [--key-id <label>]
+ *   build-manifest <dir> --name <pkg> --version <int> ...
+ *   sign-manifest <manifest> --key <private-key> [--key-id <label>]
+ *   verify <dir> [--pub <public-key>]
+ *   key-fingerprint <public-key>
+ *   hash-filename <file>             Mode 1 change hints (not a security mode)
  */
 
-export { initKey } from "./commands/init-key.js";
+export { initKey, defaultKeyId, PRIVATE_KEY_FILENAME, PUBLIC_KEY_FILENAME } from "./commands/init-key.js";
 export type { InitKeyOptions, InitKeyResult } from "./commands/init-key.js";
 
-export { buildManifest } from "./commands/build-manifest.js";
+export { buildManifest, UNSIGNED_MANIFEST_FILENAME } from "./commands/build-manifest.js";
 export type { BuildManifestOptions, BuildManifestResult } from "./commands/build-manifest.js";
 
-export { signManifest } from "./commands/sign-manifest.js";
+export { signManifest, readRawKey } from "./commands/sign-manifest.js";
 export type { SignManifestOptions, SignManifestResult } from "./commands/sign-manifest.js";
 
 export { verify } from "./commands/verify.js";
@@ -24,6 +32,18 @@ export type { HashFilenameOptions, HashFilenameResult } from "./commands/hash-fi
 
 export { protect } from "./commands/protect.js";
 export type { ProtectOptions, ProtectResult, ProtectMode } from "./commands/protect.js";
+
+import type { LintRule } from "@contextlock/core";
+
+function collectAllowLints(args: string[]): LintRule[] {
+  const rules: LintRule[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--allow-lint" && args[i + 1]) {
+      rules.push(args[i + 1] as LintRule);
+    }
+  }
+  return rules;
+}
 
 /**
  * CLI command routing - parses process.argv and dispatches to command functions.
@@ -39,33 +59,42 @@ async function main(): Promise<void> {
 
   switch (command) {
     case "init-key": {
-      const outputIdx = args.indexOf("--output");
-      const output = outputIdx !== -1 ? args[outputIdx + 1] : undefined;
       const { initKey: run } = await import("./commands/init-key.js");
-      const result = await run({ output });
+      const result = await run({
+        output: get("--output") || undefined,
+        keyId: get("--key-id") || undefined,
+      });
       console.log(`Keypair generated:`);
       console.log(`  Private key: ${result.privateKeyPath}`);
       console.log(`  Public key:  ${result.publicKeyPath}`);
+      console.log(`  Key ID:      ${result.keyId}`);
       console.log(`  Fingerprint: ${result.fingerprint}`);
       break;
     }
 
     case "build-manifest": {
       const dir = args[1];
-      if (!dir) {
-        console.error("Usage: tcv-publisher build-manifest <dir> --name <pkg> --version <ver> --publisher <name> --key-id <id> --fingerprint <fp>");
+      const versionRaw = get("--version");
+      if (!dir || !versionRaw) {
+        console.error(
+          "Usage: contextlock-publisher build-manifest <dir> --name <pkg> --version <int> --publisher <name> --key-id <label> " +
+            "[--display-version <v>] [--expires-days <n>] [--allow-lint <rule>]...",
+        );
         process.exit(1);
       }
+      const version = Number.parseInt(versionRaw, 10);
       const { buildManifest: run } = await import("./commands/build-manifest.js");
       const result = await run({
         directory: dir,
         packageName: get("--name"),
-        version: get("--version"),
+        version,
+        displayVersion: get("--display-version") || undefined,
         publisherName: get("--publisher"),
         keyId: get("--key-id"),
-        fingerprint: get("--fingerprint"),
+        expiresDays: get("--expires-days") ? Number.parseInt(get("--expires-days"), 10) : undefined,
+        allowLints: collectAllowLints(args),
       });
-      if (result.warning) {
+      if (result.fileCount === 0) {
         console.warn(`Warning: ${result.warning}`);
       } else {
         console.log(`Manifest built: ${result.manifestPath}`);
@@ -79,33 +108,42 @@ async function main(): Promise<void> {
 
     case "sign-manifest": {
       const manifestPath = args[1];
-      const keyIdx = args.indexOf("--key");
-      const privateKeyPath = keyIdx !== -1 ? args[keyIdx + 1] : "";
+      const privateKeyPath = get("--key");
       if (!manifestPath || !privateKeyPath) {
-        console.error("Usage: tcv-publisher sign-manifest <manifest> --key <private-key>");
+        console.error("Usage: contextlock-publisher sign-manifest <manifest> --key <private-key> [--key-id <label>]");
         process.exit(1);
       }
       const { signManifest: run } = await import("./commands/sign-manifest.js");
-      const result = await run({ manifestPath, privateKeyPath });
-      console.log(`Signature created: ${result.signaturePath}`);
-      console.log(`  Key ID: ${result.keyId}`);
+      const result = await run({
+        manifestPath,
+        privateKeyPath,
+        keyId: get("--key-id") || undefined,
+      });
+      console.log(`Envelope created: ${result.envelopePath}`);
+      console.log(`  Key ID:      ${result.keyId}`);
+      console.log(`  Fingerprint: ${result.fingerprint}`);
       break;
     }
 
     case "verify": {
       const dir = args[1];
       if (!dir) {
-        console.error("Usage: tcv-publisher verify <dir>");
+        console.error("Usage: contextlock-publisher verify <dir> [--pub <public-key>]");
         process.exit(1);
       }
       const { verify: run } = await import("./commands/verify.js");
-      const result = await run({ directory: dir });
-      if (!result.manifestFound) {
-        console.error("Error: manifest.json not found");
+      const result = await run({ directory: dir, publicKeyPath: get("--pub") || undefined });
+      if (!result.envelopeFound) {
+        console.error("Error: contextlock.dsse.json not found");
         process.exit(1);
       }
       if (result.error) {
         console.error(`Error: ${result.error}`);
+      }
+      if (result.signatureValid === undefined) {
+        console.warn("Warning: no public key found; signature NOT verified");
+      } else if (result.signatureValid) {
+        console.log("Signature: OK");
       }
       for (const fr of result.fileResults) {
         if (fr.status === "ok") {
@@ -115,7 +153,7 @@ async function main(): Promise<void> {
           console.log(`    expected: ${fr.expectedHash}`);
           console.log(`    computed: ${fr.computedHash}`);
         } else {
-          console.log(`  ✗ ${fr.path} (missing)`);
+          console.log(`  ✗ ${fr.path} (${fr.status})`);
         }
       }
       process.exit(result.success ? 0 : 1);
@@ -125,7 +163,7 @@ async function main(): Promise<void> {
     case "key-fingerprint": {
       const pubKeyPath = args[1];
       if (!pubKeyPath) {
-        console.error("Usage: tcv-publisher key-fingerprint <public-key>");
+        console.error("Usage: contextlock-publisher key-fingerprint <public-key>");
         process.exit(1);
       }
       const { keyFingerprint: run } = await import("./commands/key-fingerprint.js");
@@ -137,16 +175,14 @@ async function main(): Promise<void> {
     case "hash-filename": {
       const filePath = args[1];
       if (!filePath) {
-        console.error("Usage: tcv-publisher hash-filename <file> [--length <n>] [--output <dir>]");
+        console.error("Usage: contextlock-publisher hash-filename <file> [--length <n>] [--output <dir>]");
         process.exit(1);
       }
       const lengthIdx = args.indexOf("--length");
       const hashLength = lengthIdx !== -1 ? parseInt(args[lengthIdx + 1], 10) : 16;
-      const outIdx = args.indexOf("--output");
-      const outputDir = outIdx !== -1 ? args[outIdx + 1] : undefined;
       const { hashFilename: run } = await import("./commands/hash-filename.js");
-      const result = await run({ filePath, hashLength, outputDir });
-      console.log(`Hash-protected file: ${result.hashedPath}`);
+      const result = await run({ filePath, hashLength, outputDir: get("--output") || undefined });
+      console.log(`Change-hint file: ${result.hashedPath}`);
       console.log(`  Full SHA-256: ${result.hash}`);
       console.log(`  Embedded:     ${result.embeddedHash}`);
       break;
@@ -155,7 +191,11 @@ async function main(): Promise<void> {
     case "protect": {
       const dir = args[1];
       if (!dir) {
-        console.error("Usage: tcv-publisher protect <dir> --mode <hash|sign> [--name <pkg>] [--version <ver>] [--publisher <name>] [--key <private-key>]");
+        console.error(
+          "Usage: contextlock-publisher protect <dir> --mode <hash|sign> [--name <pkg>] [--version <int>] " +
+            "[--display-version <v>] [--publisher <name>] [--key <private-key>] [--key-id <label>] " +
+            "[--expires-days <n>] [--allow-lint <rule>]...",
+        );
         process.exit(1);
       }
       const modeFlag = get("--mode") || "sign";
@@ -168,14 +208,18 @@ async function main(): Promise<void> {
         directory: dir,
         mode: modeFlag as "hash" | "sign",
         packageName: get("--name"),
-        version: get("--version"),
+        version: get("--version") ? Number.parseInt(get("--version"), 10) : undefined,
+        displayVersion: get("--display-version") || undefined,
         publisherName: get("--publisher"),
-        privateKeyPath: get("--key"),
+        keyId: get("--key-id") || undefined,
+        privateKeyPath: get("--key") || undefined,
+        expiresDays: get("--expires-days") ? Number.parseInt(get("--expires-days"), 10) : undefined,
+        allowLints: collectAllowLints(args),
       });
       if (result.filesProtected === 0) {
         console.warn("No protected files found in directory.");
       } else if (result.mode === "hash") {
-        console.log(`Hash-protected ${result.filesProtected} file(s):`);
+        console.log(`Change-hinted ${result.filesProtected} file(s):`);
         for (const hr of result.hashResults!) {
           console.log(`  ${hr.originalPath} → ${hr.hashedPath}`);
         }
@@ -186,9 +230,9 @@ async function main(): Promise<void> {
           console.log(`  Public key:  ${result.keyResult!.publicKeyPath}`);
           console.log(`  Fingerprint: ${result.keyResult!.fingerprint}`);
         }
-        console.log(`Manifest: ${result.buildResult!.manifestPath} (${result.filesProtected} files)`);
-        console.log(`Signature: ${result.signResult!.signaturePath}`);
-        console.log(`  Key ID: ${result.signResult!.keyId}`);
+        console.log(`Envelope: ${result.signResult!.envelopePath} (${result.filesProtected} files)`);
+        console.log(`  Key ID:      ${result.signResult!.keyId}`);
+        console.log(`  Fingerprint: ${result.signResult!.fingerprint}`);
       }
       break;
     }

@@ -52,6 +52,20 @@ export type {
   PreToolUseHookResult,
 } from "./commands/hook.js";
 
+export { install } from "./commands/install.js";
+export type { InstallOptions, InstallResult } from "./commands/install.js";
+
+export { inspect } from "./commands/inspect.js";
+export type { InspectOptions, InspectResult } from "./commands/inspect.js";
+
+export { trustRootAdd, trustRootUpdate, trustReset } from "./commands/trust-root.js";
+export type {
+  TrustRootOptions,
+  TrustRootResult,
+  TrustResetOptions,
+  TrustResetResult,
+} from "./commands/trust-root.js";
+
 // ---- argument parsing ----
 
 interface Parsed {
@@ -219,7 +233,7 @@ export async function runCli(argv: string[]): Promise<number> {
         return 2;
       }
 
-      // ---- v1: trust management ----
+      // ---- trust management ----
       case "trust": {
         const subcommand = args[1];
         const storePath = getFlag("--store") ?? defaultTrustStore();
@@ -228,12 +242,63 @@ export async function runCli(argv: string[]): Promise<number> {
             const pubKeyPath = args[2];
             const name = getFlag("--name") ?? "unknown";
             if (!pubKeyPath) {
-              console.error("Usage: contextlock trust add <public-key> --name <publisher>");
+              console.error("Usage: contextlock trust add <public-key> --name <publisher> [--key-id <label>]");
               return 2;
             }
             const { trustAdd: run } = await import("./commands/trust-add.js");
-            const result = await run({ publicKeyPath: pubKeyPath, publisherName: name, trustStorePath: storePath });
-            console.log(`Added publisher "${result.publisherName}" (fingerprint: ${result.fingerprint})`);
+            const result = await run({
+              publicKeyPath: pubKeyPath,
+              publisherName: name,
+              trustStorePath: storePath,
+              keyId: getFlag("--key-id"),
+            });
+            console.log(`Added publisher "${result.publisherName}" (key_id: ${result.keyId}, fingerprint: ${result.fingerprint})`);
+            return 0;
+          }
+          case "reset": {
+            const publisher = args[2];
+            if (!publisher) {
+              console.error("Usage: contextlock trust reset <publisher>");
+              return 2;
+            }
+            const { trustReset: run } = await import("./commands/trust-root.js");
+            const result = await run({ publisher });
+            if (!result.ok) {
+              console.error(`Error: ${result.reason}`);
+              return 2;
+            }
+            console.log(
+              `Reset ${result.baselinesReset} anti-rollback baseline(s) for "${result.publisher}" (fast-forward recovery)`,
+            );
+            return 0;
+          }
+          case "root": {
+            const action = args[2];
+            const publisher = args[3];
+            const rootPath = args[4];
+            if ((action !== "add" && action !== "update") || !publisher || !rootPath) {
+              console.error("Usage: contextlock trust root <add|update> <publisher> <root-envelope>");
+              return 2;
+            }
+            const { trustRootAdd, trustRootUpdate } = await import("./commands/trust-root.js");
+            const run = action === "add" ? trustRootAdd : trustRootUpdate;
+            const result = await run({
+              publisher,
+              rootEnvelopePath: rootPath,
+              trustStorePath: storePath,
+            });
+            if (!result.ok) {
+              console.error(`Error: ${result.reason}`);
+              return 2;
+            }
+            const r = result.root!;
+            console.log(
+              `Pinned root v${r.version} for "${result.publisher}" ` +
+                `(${Object.keys(r.keys).length} key(s), threshold ${r.threshold}, expires ${r.expires_at})`,
+            );
+            if (result.baselinesReset !== undefined && result.baselinesReset > 0) {
+              console.log(`Reset ${result.baselinesReset} anti-rollback baseline(s) (key rotation)`);
+            }
             return 0;
           }
           case "remove": {
@@ -279,9 +344,74 @@ export async function runCli(argv: string[]): Promise<number> {
             return 2;
           }
           default:
-            console.error("Unknown trust subcommand. Available: add, remove, list, revoke");
+            console.error("Unknown trust subcommand. Available: add, remove, list, revoke, reset, root");
             return 2;
         }
+      }
+
+      // ---- install (Layer 1: verify BEFORE placing files) ----
+      case "install": {
+        const source = args[1];
+        const dest = getFlag("--dest");
+        if (!source || !dest) {
+          console.error("Usage: contextlock install <source-dir> --dest <dir>");
+          return 2;
+        }
+        const { install: run } = await import("./commands/install.js");
+        const result = await run({
+          source,
+          dest,
+          trustStorePath: getFlag("--store") ?? defaultTrustStore(),
+        });
+        if (json) {
+          console.log(JSON.stringify(result, null, 2));
+          return result.installed ? 0 : 3;
+        }
+        if (!result.installed) {
+          const v = result.verification;
+          console.error(`✗ install refused: ${v.status}${v.reason ? ` (${v.reason})` : ""}`);
+          for (const f of v.files.filter((f) => f.status !== "ok")) {
+            console.error(`  ✗ ${f.path} (${f.status})`);
+          }
+          console.error("Nothing was written.");
+          return 3;
+        }
+        const v = result.verification;
+        console.log(
+          `✓ verified package "${v.manifest!.package}" v${v.manifest!.version} ` +
+            `(publisher: ${v.publisher}, key: ${v.keyId})`,
+        );
+        if (v.warning) console.warn(`  warning: ${v.warning}`);
+        for (const w of result.written) console.log(`  installed ${w}`);
+        return 0;
+      }
+
+      // ---- inspect (pretty-print an envelope payload; does NOT verify) ----
+      case "inspect": {
+        const envelopePath = args[1];
+        if (!envelopePath) {
+          console.error("Usage: contextlock inspect <contextlock.dsse.json>");
+          return 2;
+        }
+        const { inspect: run } = await import("./commands/inspect.js");
+        const result = await run({ envelopePath });
+        if (json) {
+          console.log(
+            JSON.stringify(
+              {
+                payloadType: result.payloadType,
+                signatureCount: result.signatureCount,
+                keyIds: result.keyIds,
+                payload: result.payload,
+              },
+              null,
+              2,
+            ),
+          );
+        } else {
+          console.log(result.displayMessage);
+        }
+        return 0;
       }
 
       case "verify": {
@@ -325,7 +455,7 @@ export async function runCli(argv: string[]): Promise<number> {
       default:
         console.error(
           [
-            "contextlock - integrity for AI instruction files (SPEC v2 Phase A)",
+            "contextlock - integrity for AI instruction files (SPEC v2 Phase B)",
             "",
             "Commands:",
             "  seal <path...> [--note <text>]     pin a reviewed file (Mode 0 TOFU)",
@@ -339,7 +469,11 @@ export async function runCli(argv: string[]): Promise<number> {
             "  hook session-start|pre-tool-use    Claude Code hook entry points (JSON on stdin);",
             "                                     hook failures fail OPEN (allow, loud stderr warning)",
             "                                     unless CONTEXTLOCK_STRICT=1, then fail CLOSED (deny)",
+            "  install <dir> --dest <dir>         verify a signed package, THEN place its files",
+            "  inspect <envelope>                 pretty-print a DSSE envelope payload (no verify)",
             "  trust add|remove|list|revoke       publisher trust management",
+            "  trust root add|update <pub> <env>  pin / rotate a publisher root (SPEC v2 6.5)",
+            "  trust reset <publisher>            clear anti-rollback baselines (fast-forward)",
             "  verify <file>                      full verification of one file",
             "  cache refresh | key-fingerprint    utilities",
             "",

@@ -47,7 +47,9 @@ function formatResult(
       line = `✓ ${name} - sealed+trusted (publisher: ${result.publisher}, key: ${result.keyId})`;
       break;
     case "modified":
-      line = `✗ ${name} - modified (expected: ${result.expectedHash}, computed: ${result.fileHash})`;
+      line = result.fileHash
+        ? `✗ ${name} - modified (expected: ${result.expectedHash}, computed: ${result.fileHash})`
+        : `✗ ${name} - modified (expected: ${result.expectedHash})`;
       if (result.reason) line += ` [${result.reason}]`;
       break;
     case "untrusted":
@@ -58,6 +60,9 @@ function formatResult(
       break;
     case "expired":
       line = `✗ ${name} - expired (expires_at: ${result.expiresAt})`;
+      break;
+    case "rollback":
+      line = `✗ ${name} - ROLLBACK detected (${result.reason})`;
       break;
     case "seal-store-unavailable":
       line = `✗ ${name} - seal store unavailable: possible tampering (${result.reason})`;

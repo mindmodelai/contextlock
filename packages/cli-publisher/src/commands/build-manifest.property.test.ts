@@ -44,14 +44,13 @@ describe("Property 14: Manifest building includes all protected files", () => {
               await writeFile(join(tempDir, nonProtectedFiles[i]), content, "utf-8");
             }
 
-            // Build manifest
+            // Build manifest (v2: integer version, no fingerprint field)
             const result = await buildManifest({
               directory: tempDir,
               packageName: "test-pkg",
-              version: "1.0.0",
+              version: 1,
               publisherName: "tester",
               keyId: "key-1",
-              fingerprint: "fp-1",
               patterns: DEFAULT_PATTERNS,
             });
 

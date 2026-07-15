@@ -1,113 +1,48 @@
 /**
- * Unit tests for User CLI commands.
- * Requirements: 5.2, 5.3, 5.6, 9.1, 14.3, 14.4
+ * Unit tests for User CLI commands (v2 format fixtures).
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, writeFile, readFile, rm, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { sha512 } from "@noble/hashes/sha2";
-import * as ed from "@noble/ed25519";
-import {
-  computeFingerprint,
-  TrustStore,
-  serializeManifest,
-  serializeSignature,
-  sha256,
-} from "@contextlock/core";
-import type { Manifest, DetachedSignature, TrustedPublisher } from "@contextlock/core";
+import { TrustStore, base64urlEncode as b64uEncode } from "@contextlock/core";
 import { trustAdd } from "./trust-add.js";
 import { trustRemove } from "./trust-remove.js";
 import { trustList } from "./trust-list.js";
 import { trustRevoke } from "./trust-revoke.js";
 import { userVerify } from "./verify.js";
 import { keyFingerprint } from "./key-fingerprint.js";
+import {
+  makeKeypair,
+  writeSignedPackage,
+  writeTrustStore,
+  uniquePackageName,
+} from "../../../core/src/testkit.js";
 
-// Configure @noble/ed25519 v2 sha512 sync
-if (!ed.etc.sha512Sync) {
-  ed.etc.sha512Sync = (...m: Uint8Array[]) =>
-    sha512(ed.etc.concatBytes(...m));
-}
-
-/** Helper: generate an Ed25519 keypair and save to files. */
+/** Helper: generate an Ed25519 keypair and save to files (base64url raw). */
 async function generateKeypair(dir: string) {
-  const privateKey = ed.utils.randomPrivateKey();
-  const publicKey = await ed.getPublicKeyAsync(privateKey);
-  const privB64 = Buffer.from(privateKey).toString("base64");
-  const pubB64 = Buffer.from(publicKey).toString("base64");
-  const privPath = join(dir, "tcv-private.key");
-  const pubPath = join(dir, "tcv-public.key");
-  await writeFile(privPath, privB64, "utf-8");
-  await writeFile(pubPath, pubB64, "utf-8");
-  const fingerprint = computeFingerprint(Buffer.from(publicKey));
-  return { privateKey, publicKey, privPath, pubPath, fingerprint, pubB64 };
+  const kp = await makeKeypair();
+  const privPath = join(dir, "contextlock-private.key");
+  const pubPath = join(dir, "contextlock-public.key");
+  await writeFile(privPath, b64uEncode(kp.privateKey) + "\n", "utf-8");
+  await writeFile(pubPath, b64uEncode(kp.publicKey) + "\n", "utf-8");
+  return { ...kp, privPath, pubPath };
 }
 
-function base64urlEncode(data: Uint8Array): string {
-  return Buffer.from(data)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-/** Helper: create a signed package directory with a SKILL.md file. */
+/** Helper: create a signed v2 package directory with a SKILL.md file. */
 async function createSignedPackage(dir: string, content: string) {
-  const kp = await generateKeypair(dir);
-
-  // Write protected file
-  await writeFile(join(dir, "SKILL.md"), content, "utf-8");
-
-  // Build manifest
-  const fileHash = sha256(Buffer.from(content));
-  const manifest: Manifest = {
-    schema: "tcv-manifest/v1",
-    package: "test-pkg",
-    version: "1.0.0",
-    publisher: {
-      name: "TestPublisher",
-      key_id: kp.fingerprint,
-      public_key_fingerprint: kp.fingerprint,
-    },
-    published_at: new Date().toISOString(),
-    files: [{ path: "SKILL.md", sha256: fileHash, size: Buffer.byteLength(content) }],
-  };
-
-  const manifestJson = serializeManifest(manifest);
-  const manifestPath = join(dir, "manifest.json");
-  await writeFile(manifestPath, manifestJson, "utf-8");
-
-  // Sign manifest
-  const manifestBuf = Buffer.from(manifestJson);
-  const manifestHash = sha256(manifestBuf);
-  const sigBytes = await ed.signAsync(manifestBuf, kp.privateKey);
-  const sig: DetachedSignature = {
-    schema: "tcv-signature/v1",
-    manifest_sha256: manifestHash,
-    algorithm: "Ed25519",
-    key_id: kp.fingerprint,
-    signature: base64urlEncode(sigBytes),
-  };
-  await writeFile(join(dir, "manifest.sig.json"), serializeSignature(sig), "utf-8");
-
-  // Create trust store with this publisher
-  const storePath = join(dir, "truststore.json");
-  const store = new TrustStore();
-  store.addPublisher({
-    publisher: "TestPublisher",
-    key_id: kp.fingerprint,
-    public_key: kp.pubB64,
-    fingerprint: kp.fingerprint,
-    revoked: false,
-    policy: {
-      default_action: "warn",
-      allow_expired_manifest: false,
-      allow_offline_cached_manifest: false,
-    },
+  const kp = await makeKeypair();
+  const { manifest } = await writeSignedPackage(dir, kp, {
+    packageName: uniquePackageName("user-cli"),
+    publisherName: "TestPublisher",
+    files: { "SKILL.md": content },
   });
-  await store.save(storePath);
-
+  const storePath = join(dir, "truststore.json");
+  await writeTrustStore(storePath, [kp], {
+    publisherName: "TestPublisher",
+    policy: { default_action: "warn" },
+  });
   return { ...kp, storePath, manifest };
 }
 
@@ -244,7 +179,7 @@ describe("User CLI Commands", () => {
       expect(result.result.publisher).toBe("TestPublisher");
       expect(result.displayMessage).toContain("trusted");
       expect(result.displayMessage).toContain("TestPublisher");
-      expect(result.displayMessage).toContain(pkg.fingerprint);
+      expect(result.displayMessage).toContain(pkg.keyId);
     });
 
     it("returns modified for a tampered file", async () => {
