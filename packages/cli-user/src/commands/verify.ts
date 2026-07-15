@@ -13,6 +13,8 @@ export interface UserVerifyOptions {
   trustStorePath: string;
   cachePath?: string;
   policyLevel?: "strict" | "balanced" | "audit";
+  /** Minimum distinct trusted signing keys (reviewer multi-signatures). */
+  requiredSigners?: number;
 }
 
 export interface UserVerifyResult {
@@ -37,7 +39,10 @@ function formatResult(
   let line: string;
   switch (result.status) {
     case "trusted":
-      line = `✓ ${name} - trusted (publisher: ${result.publisher}, key: ${result.keyId})`;
+      line = result.identity
+        ? `✓ ${name} - trusted (publisher: ${result.publisher}, identity: ${result.identity}, issuer: ${result.issuer})`
+        : `✓ ${name} - trusted (publisher: ${result.publisher}, key: ${result.keyId})`;
+      if (result.signerCount && result.signerCount > 1) line += ` [${result.signerCount} signers]`;
       if (result.warning) line += ` [warning: ${result.warning}]`;
       break;
     case "sealed":
@@ -104,6 +109,7 @@ export async function userVerify(options: UserVerifyOptions): Promise<UserVerify
     cachePath,
     protectedPatterns: DEFAULT_PATTERNS,
     policyLevel,
+    requiredSigners: options.requiredSigners,
   };
 
   const engine = new VerificationEngine(config);

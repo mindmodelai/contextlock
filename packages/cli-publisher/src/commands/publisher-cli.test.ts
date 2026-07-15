@@ -22,6 +22,7 @@ import {
 import { initKey } from "./init-key.js";
 import { buildManifest } from "./build-manifest.js";
 import { signManifest } from "./sign-manifest.js";
+import { countersign } from "./countersign.js";
 import { verify } from "./verify.js";
 import { keyFingerprint } from "./key-fingerprint.js";
 import { hashFilename } from "./hash-filename.js";
@@ -211,6 +212,71 @@ describe("Publisher CLI Commands", () => {
       await expect(
         signManifest({ manifestPath: badPath, privateKeyPath: keyResult.privateKeyPath }),
       ).rejects.toThrow(/Invalid manifest/);
+    });
+  });
+
+  describe("countersign", () => {
+    it("appends a reviewer signature; both signatures verify over the same payload", async () => {
+      const author = await initKey({ output: tempDir, keyId: "cl-author" });
+      const reviewerDir = join(tempDir, "reviewer");
+      await mkdir(reviewerDir, { recursive: true });
+      const reviewer = await initKey({ output: reviewerDir, keyId: "cl-reviewer" });
+
+      await writeFile(join(tempDir, "SKILL.md"), "# Reviewed skill", "utf-8");
+      const buildResult = await buildManifest({
+        directory: tempDir,
+        packageName: "countersign-test",
+        version: 1,
+        publisherName: "Author",
+        keyId: author.keyId,
+      });
+      const signResult = await signManifest({
+        manifestPath: buildResult.manifestPath,
+        privateKeyPath: author.privateKeyPath,
+      });
+
+      const result = await countersign({
+        envelopePath: signResult.envelopePath,
+        privateKeyPath: reviewer.privateKeyPath,
+        keyId: reviewer.keyId,
+      });
+
+      expect(result.signatureCount).toBe(2);
+      const envelope = parseEnvelope(await readFile(signResult.envelopePath));
+      expect(envelope.signatures.map((s) => s.keyid)).toEqual(["cl-author", "cl-reviewer"]);
+      // Payload bytes are untouched: the original manifest still round-trips.
+      expect(b64Decode(envelope.payload).toString("utf-8")).toBe(buildResult.manifestJson);
+
+      // Both signatures verify over PAE of the SAME payload.
+      const payload = b64Decode(envelope.payload);
+      const preAuth = new Uint8Array(pae(envelope.payloadType, payload));
+      const authorPub = base64urlDecode((await readFile(author.publicKeyPath, "utf-8")).trim());
+      const reviewerPub = base64urlDecode((await readFile(reviewer.publicKeyPath, "utf-8")).trim());
+      expect(await ed.verifyAsync(new Uint8Array(b64Decode(envelope.signatures[0].sig)), preAuth, authorPub)).toBe(true);
+      expect(await ed.verifyAsync(new Uint8Array(b64Decode(envelope.signatures[1].sig)), preAuth, reviewerPub)).toBe(true);
+    });
+
+    it("refuses a duplicate countersignature by the same key", async () => {
+      const author = await initKey({ output: tempDir, keyId: "cl-author" });
+      await writeFile(join(tempDir, "SKILL.md"), "# Skill", "utf-8");
+      const buildResult = await buildManifest({
+        directory: tempDir,
+        packageName: "dup-countersign",
+        version: 1,
+        publisherName: "Author",
+        keyId: author.keyId,
+      });
+      const signResult = await signManifest({
+        manifestPath: buildResult.manifestPath,
+        privateKeyPath: author.privateKeyPath,
+      });
+
+      await expect(
+        countersign({
+          envelopePath: signResult.envelopePath,
+          privateKeyPath: author.privateKeyPath,
+        }),
+      ).rejects.toThrow(/already signed/);
     });
   });
 

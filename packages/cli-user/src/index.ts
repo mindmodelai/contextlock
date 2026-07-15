@@ -66,6 +66,16 @@ export type {
   TrustResetResult,
 } from "./commands/trust-root.js";
 
+export { trustIdentityAdd, trustIdentityList, trustIdentityRemove } from "./commands/trust-identity.js";
+export type {
+  TrustIdentityAddOptions,
+  TrustIdentityAddResult,
+  TrustIdentityListOptions,
+  TrustIdentityListResult,
+  TrustIdentityRemoveOptions,
+  TrustIdentityRemoveResult,
+} from "./commands/trust-identity.js";
+
 // ---- argument parsing ----
 
 interface Parsed {
@@ -272,6 +282,56 @@ export async function runCli(argv: string[]): Promise<number> {
             );
             return 0;
           }
+          case "identity": {
+            const action = args[2];
+            const storeOpt = { trustStorePath: storePath };
+            if (action === "add") {
+              const publisher = args[3];
+              const identity = getFlag("--identity");
+              const issuer = getFlag("--issuer");
+              if (!publisher || !identity || !issuer) {
+                console.error(
+                  "Usage: contextlock trust identity add <publisher> --identity <san-glob> --issuer <oidc-url>",
+                );
+                return 2;
+              }
+              const { trustIdentityAdd } = await import("./commands/trust-identity.js");
+              const result = await trustIdentityAdd({ publisher, identity, issuer, ...storeOpt });
+              console.log(
+                `Pinned identity for "${result.added.publisher}": ${result.added.identity} (issuer: ${result.added.issuer})`,
+              );
+              return 0;
+            }
+            if (action === "list") {
+              const { trustIdentityList } = await import("./commands/trust-identity.js");
+              const result = await trustIdentityList(storeOpt);
+              if (result.identities.length === 0) {
+                console.log("No pinned identities.");
+              } else {
+                for (const id of result.identities) {
+                  console.log(`  ${id.publisher}  identity=${id.identity}  issuer=${id.issuer}`);
+                }
+              }
+              return 0;
+            }
+            if (action === "remove") {
+              const publisher = args[3];
+              if (!publisher) {
+                console.error("Usage: contextlock trust identity remove <publisher> [--identity <san-glob>]");
+                return 2;
+              }
+              const { trustIdentityRemove } = await import("./commands/trust-identity.js");
+              const result = await trustIdentityRemove({
+                publisher,
+                identity: getFlag("--identity"),
+                ...storeOpt,
+              });
+              console.log(`Removed ${result.removed} pinned identit${result.removed === 1 ? "y" : "ies"}`);
+              return result.removed > 0 ? 0 : 2;
+            }
+            console.error("Usage: contextlock trust identity <add|list|remove> ...");
+            return 2;
+          }
           case "root": {
             const action = args[2];
             const publisher = args[3];
@@ -344,7 +404,7 @@ export async function runCli(argv: string[]): Promise<number> {
             return 2;
           }
           default:
-            console.error("Unknown trust subcommand. Available: add, remove, list, revoke, reset, root");
+            console.error("Unknown trust subcommand. Available: add, remove, list, revoke, reset, root, identity");
             return 2;
         }
       }
@@ -417,12 +477,17 @@ export async function runCli(argv: string[]): Promise<number> {
       case "verify": {
         const filePath = args[1];
         if (!filePath) {
-          console.error("Usage: contextlock verify <file>");
+          console.error("Usage: contextlock verify <file> [--min-signers <n>]");
           return 2;
         }
         const storePath = getFlag("--store") ?? defaultTrustStore();
+        const minSigners = getFlag("--min-signers");
         const { userVerify: run } = await import("./commands/verify.js");
-        const result = await run({ filePath, trustStorePath: storePath });
+        const result = await run({
+          filePath,
+          trustStorePath: storePath,
+          requiredSigners: minSigners ? Number.parseInt(minSigners, 10) : undefined,
+        });
         console.log(result.displayMessage);
         return ["trusted", "sealed", "sealed+trusted"].includes(result.result.status) ? 0 : 3;
       }
@@ -473,8 +538,9 @@ export async function runCli(argv: string[]): Promise<number> {
             "  inspect <envelope>                 pretty-print a DSSE envelope payload (no verify)",
             "  trust add|remove|list|revoke       publisher trust management",
             "  trust root add|update <pub> <env>  pin / rotate a publisher root (SPEC v2 6.5)",
+            "  trust identity add|list|remove     pin keyless identities (Sigstore Profile B)",
             "  trust reset <publisher>            clear anti-rollback baselines (fast-forward)",
-            "  verify <file>                      full verification of one file",
+            "  verify <file> [--min-signers <n>]  full verification of one file",
             "  cache refresh | key-fingerprint    utilities",
             "",
             "Exit codes: 0 = ok, 3 = violations found, 2 = operational error.",

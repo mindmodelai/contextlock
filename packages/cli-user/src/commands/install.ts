@@ -12,12 +12,8 @@
  */
 
 import { copyFile, mkdir } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import {
-  VerificationEngine,
-  DEFAULT_PATTERNS,
-  ENVELOPE_FILENAME,
-} from "@contextlock/core";
+import { basename, dirname, join, resolve } from "node:path";
+import { VerificationEngine, DEFAULT_PATTERNS } from "@contextlock/core";
 import type { PackageVerificationResult, PolicyLevel } from "@contextlock/core";
 
 export interface InstallOptions {
@@ -64,8 +60,11 @@ export async function install(options: InstallOptions): Promise<InstallResult> {
     await copyFile(from, to);
     written.push(entry.path);
   }
-  await copyFile(join(source, ENVELOPE_FILENAME), join(dest, ENVELOPE_FILENAME));
-  written.push(ENVELOPE_FILENAME);
+  // Copy whichever evidence artifact verified the package (Profile A
+  // contextlock.dsse.json or Profile B contextlock.sigstore.json).
+  const evidenceName = basename(verification.envelopePath!);
+  await copyFile(join(source, evidenceName), join(dest, evidenceName));
+  written.push(evidenceName);
 
   return { installed: true, verification, written };
 }

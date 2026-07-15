@@ -33,6 +33,9 @@ export type { HashFilenameOptions, HashFilenameResult } from "./commands/hash-fi
 export { protect } from "./commands/protect.js";
 export type { ProtectOptions, ProtectResult, ProtectMode } from "./commands/protect.js";
 
+export { countersign } from "./commands/countersign.js";
+export type { CountersignOptions, CountersignResult } from "./commands/countersign.js";
+
 import type { LintRule } from "@contextlock/core";
 
 function collectAllowLints(args: string[]): LintRule[] {
@@ -160,6 +163,26 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "countersign": {
+      const envelopePath = args[1];
+      const privateKeyPath = get("--key");
+      if (!envelopePath || !privateKeyPath) {
+        console.error("Usage: contextlock-publisher countersign <envelope> --key <private-key> [--key-id <label>]");
+        process.exit(1);
+      }
+      const { countersign: run } = await import("./commands/countersign.js");
+      const result = await run({
+        envelopePath,
+        privateKeyPath,
+        keyId: get("--key-id") || undefined,
+      });
+      console.log(`Countersigned: ${result.envelopePath}`);
+      console.log(`  Key ID:      ${result.keyId}`);
+      console.log(`  Fingerprint: ${result.fingerprint}`);
+      console.log(`  Signatures:  ${result.signatureCount}`);
+      break;
+    }
+
     case "key-fingerprint": {
       const pubKeyPath = args[1];
       if (!pubKeyPath) {
@@ -238,7 +261,7 @@ async function main(): Promise<void> {
     }
 
     default:
-      console.error("Unknown command. Available: protect, init-key, build-manifest, sign-manifest, verify, key-fingerprint, hash-filename");
+      console.error("Unknown command. Available: protect, init-key, build-manifest, sign-manifest, countersign, verify, key-fingerprint, hash-filename");
       process.exit(1);
   }
 }
