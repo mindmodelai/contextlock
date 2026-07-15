@@ -1,32 +1,33 @@
 # ContextLock — Trusted Content Verification for AI Coding Tools
 
-> **Direction:** the authoritative design is now [`SPEC.md`](./SPEC.md)
-> (Specification v2, 2026-07-14). It changes several things documented below:
-> hashing moves to exact bytes (canonicalization happens at sign time, not
-> verify time), the detached `manifest.sig.json` is replaced by a DSSE
-> envelope, a Local Seal (TOFU) mode becomes the MVP, and the Claude Code
-> integration section below is superseded by the real hook/plugin architecture
-> in SPEC.md section 7 (the `ClaudeCodeAdapter` class shown here has no actual
-> interception point in Claude Code). This README still accurately documents
-> the implemented v1 engine and CLIs.
+> **Direction:** the authoritative design is [`SPEC.md`](./SPEC.md)
+> (Specification v2, 2026-07-14). Phase A (Local Seal + Claude Code plugin)
+> and Phase B (signed manifests v2: DSSE envelope, `contextlock/2` format,
+> anti-rollback, root/rotation, content lints, `contextlock install`) are
+> implemented. Some long-form integration walkthroughs below predate v2; where
+> they disagree with SPEC.md, SPEC.md wins.
 
 ContextLock is a cryptographic verification system that protects AI coding tools from tampered instruction files. It verifies the authenticity and integrity of markdown artifacts — SKILL.md, CLAUDE.md, RULES.md, prompt packs, policy files — before they influence model behavior.
 
-Publishers sign manifests with Ed25519 keys. Users pin trusted public keys. When an AI tool loads a protected file, ContextLock checks the signature chain and file hash, then allows, warns, or blocks based on configurable policy.
+Publishers sign manifests with Ed25519 keys. Users pin trusted public keys (or a rotatable publisher root). When an AI tool loads a protected file, ContextLock checks the signature chain, anti-rollback state, and file hash, then allows, warns, or blocks based on configurable policy. Users can also seal files they reviewed themselves (Mode 0, trust-on-first-use) with zero publisher involvement.
 
 ## How It Works
 
 ```
-Publisher: files → SHA-256 hashes → manifest.json → Ed25519 signature → manifest.sig.json
-User:      file load → locate manifest → verify signature → compare hash → policy decision
+Publisher: files → normalize (UTF-8/LF) → SHA-256 + length → contextlock/2 manifest
+           → DSSE envelope (Ed25519 over PAE) → contextlock.dsse.json
+User:      file load → bounded envelope discovery → verify signature (pinned keys/root)
+           → anti-rollback check → expiry check → length + hash compare → policy decision
 ```
 
 The system uses:
-- SHA-256 for file integrity hashes
-- Ed25519 for manifest signatures
-- Detached signature model (manifest.json + manifest.sig.json)
+- SHA-256 over the **exact bytes on disk** (canonicalization happens at sign time only)
+- Ed25519 signatures in a **DSSE v1.0.2 envelope** (`payloadType application/vnd.contextlock.manifest+json`)
+- One shipped artifact per package: `contextlock.dsse.json` (envelope containing the manifest)
+- A monotonic integer manifest `version` + local highest-seen state (anti-rollback, T7)
+- Mandatory `expires_at` (freeze defense, T8) and per-file `length` (enforced before hashing)
+- Sign-time content lints (Unicode Tag block, zero-width, bidi controls)
 - Explicit trust only — no auto-trust from URLs, repos, or package names
-- UTF-8 canonicalization (LF newlines, no BOM) before hashing
 
 ## Repository Structure
 
@@ -189,15 +190,16 @@ const result = await protect({
   directory: "./my-package",
   mode: "sign",
   packageName: "acme-secure-skills",
-  version: "1.0.0",
+  version: 1,                       // monotonic integer (anti-rollback counter)
+  displayVersion: "1.0.0",          // human-facing, informational
   publisherName: "Acme Security",
+  keyId: "cl-acme-2026",            // short key label (DSSE keyid hint)
 });
 
 // If no keypair exists, one is generated automatically:
 console.log(result.keyGenerated);                    // true
 console.log(result.keyResult!.fingerprint);          // "c8e4b7d5..."
-console.log(result.buildResult!.manifestPath);       // "./my-package/manifest.json"
-console.log(result.signResult!.signaturePath);       // "./my-package/manifest.sig.json"
+console.log(result.signResult!.envelopePath);        // "./my-package/contextlock.dsse.json"
 console.log(result.filesProtected);                  // 2
 ```
 
@@ -205,36 +207,37 @@ Or do each step individually for more control:
 
 #### Publisher Workflow
 
-Publishers create keys, build manifests, sign them, and distribute alongside their files.
+Publishers create keys, build manifests, sign them into a DSSE envelope, and distribute alongside their files. Building normalizes each covered file to UTF-8/LF/no-BOM on disk, runs the content lints (Unicode Tags, zero-width, bidi controls — a hit blocks signing unless `allowLints` records the exception), and hashes the exact resulting bytes.
 
 ```typescript
 import { initKey, buildManifest, signManifest, verify } from "@contextlock/cli-publisher";
 
-// 1. Generate Ed25519 keypair
-const keys = await initKey({ output: "./keys" });
-// → keys.privateKeyPath, keys.publicKeyPath, keys.fingerprint
+// 1. Generate Ed25519 keypair (raw 32-byte keys, base64url)
+const keys = await initKey({ output: "./keys", keyId: "cl-acme-2026" });
+// → keys.privateKeyPath, keys.publicKeyPath, keys.fingerprint, keys.keyId
 
-// 2. Build manifest for a package directory
+// 2. Build a contextlock/2 manifest for a package directory
 const manifest = await buildManifest({
   directory: "./my-package",
   packageName: "acme-secure-skills",
-  version: "1.0.0",
+  version: 1,                        // integer, monotonic
+  displayVersion: "1.0.0",
   publisherName: "Acme Security",
-  keyId: keys.fingerprint,
-  fingerprint: keys.fingerprint,
+  keyId: keys.keyId,
+  expiresDays: 365,                  // expires_at is REQUIRED in v2
 });
-// → manifest.json written to ./my-package/manifest.json
+// → contextlock.manifest.json (unsigned intermediate) written to ./my-package
 
-// 3. Sign the manifest
+// 3. Sign the manifest into the DSSE envelope
 const sig = await signManifest({
   manifestPath: manifest.manifestPath,
   privateKeyPath: keys.privateKeyPath,
 });
-// → manifest.sig.json written alongside manifest.json
+// → contextlock.dsse.json written alongside (the ONLY artifact you ship)
 
-// 4. Verify before publishing
+// 4. Verify before publishing (signature + every file's length, hash, lints)
 const result = await verify({ directory: "./my-package" });
-// → result.success === true, all files pass
+// → result.success === true, result.signatureValid === true
 ```
 
 #### User Workflow
@@ -242,45 +245,52 @@ const result = await verify({ directory: "./my-package" });
 Users manage trusted publishers and verify files before loading.
 
 ```typescript
-import { trustAdd, trustList, userVerify, trustRevoke } from "@contextlock/cli-user";
+import { trustAdd, trustList, userVerify, trustRevoke, install, inspect } from "@contextlock/cli-user";
 
 // 1. Trust a publisher by their public key
 await trustAdd({
   publicKeyPath: "./acme-public.key",
   publisherName: "Acme Security",
-  trustStorePath: "./tcv-truststore.json",
+  keyId: "cl-acme-2026",            // optional label; defaults to cl-<fp8>
+  trustStorePath: "./truststore.json",
 });
 
 // 2. List trusted publishers
-const { publishers } = await trustList({ trustStorePath: "./tcv-truststore.json" });
-// → [{ publisher: "Acme Security", key_id: "c8e4b7...", fingerprint: "c8e4b7..." }]
+const { publishers } = await trustList({ trustStorePath: "./truststore.json" });
+// → [{ publisher: "Acme Security", key_id: "cl-acme-2026", fingerprint: "c8e4b7..." }]
 
-// 3. Verify a file (checks manifest+signature, then also extracts filename hash if present)
+// 3. Install a downloaded package: verify EVERYTHING, then place files (Layer 1)
+const installed = await install({
+  source: "./downloads/acme-secure-skills",
+  dest: "./.claude/skills/acme-secure-skills",
+  trustStorePath: "./truststore.json",
+});
+// → installed.installed === true, or nothing was written at all
+
+// 4. Verify a file in place
 const result = await userVerify({
   filePath: "./my-package/SKILL.md",
-  trustStorePath: "./tcv-truststore.json",
+  trustStorePath: "./truststore.json",
 });
 // → result.result.status === "trusted"
-// → result.displayMessage === "✓ ./my-package/SKILL.md — trusted (publisher: Acme Security, key: c8e4b7...)"
-// → result.filenameHash === undefined (no hash in filename)
+// → result.displayMessage === "✓ ./my-package/SKILL.md — trusted (publisher: Acme Security, key: cl-acme-2026)"
 
-// 4. Verify a hash-embedded file (no manifest needed for the advisory check)
-const hashResult = await userVerify({
-  filePath: "./downloads/SKILL.a3f5c9e8d1f24a6c.md",
-  trustStorePath: "./tcv-truststore.json",
-});
-// → hashResult.result.status === "untrusted" (no manifest — can't prove identity)
-// → hashResult.filenameHash.hasEmbeddedHash === true
-// → hashResult.filenameHash.matches === true  (content integrity confirmed, advisory only)
-// → hashResult.displayMessage includes:
-//     "✗ ... — untrusted (no manifest found)"
-//     "  ℹ filename hash matches (advisory — does not prove publisher identity)"
+// 5. Inspect an envelope payload (pretty-print; does NOT verify)
+const inspected = await inspect({ envelopePath: "./my-package/contextlock.dsse.json" });
 
-// 5. Revoke a compromised key
+// 6. Revoke a compromised key (by label or fingerprint)
 await trustRevoke({
-  keyId: "c8e4b7d5f9c2...",
-  trustStorePath: "./tcv-truststore.json",
+  keyId: "cl-acme-2026",
+  trustStorePath: "./truststore.json",
 });
+```
+
+Root-of-trust management for publishers who rotate keys (SPEC v2 6.5):
+
+```bash
+contextlock trust root add "Acme Security" ./contextlock.root.dsse.json     # pin initial root (TOFU)
+contextlock trust root update "Acme Security" ./root-v2.dsse.json          # verified rotation (N+1, old+new thresholds)
+contextlock trust reset "Acme Security"                                     # fast-forward recovery (clears rollback baselines)
 ```
 
 ### Policy Levels
@@ -289,14 +299,15 @@ The policy engine evaluates verification results against three levels:
 
 | Status | strict | balanced | audit |
 |--------|--------|----------|-------|
-| trusted | allow | allow | allow |
+| trusted / sealed / sealed+trusted | allow | allow | allow |
 | modified | block | block | audit |
 | untrusted | block | warn | audit |
 | revoked | block | block | audit |
 | expired | block | warn | audit |
-| error | block | block | audit |
+| rollback | block | block | audit |
+| error / seal-store-unavailable | block | block | audit |
 
-Per-publisher policy overrides can be set in the trust store to customize behavior for specific publishers.
+Per-publisher policy overrides can be set in the trust store to customize behavior for specific publishers. `rollback` (an older signed manifest replayed after a newer one was seen) blocks under both strict and balanced — it is an active attack signal, like `revoked`.
 
 ---
 
@@ -339,12 +350,13 @@ await writeFile("./demo-package/RULES.md", `# Rules
 2. Flag any hardcoded credentials.
 3. Suggest tests for untested code paths.`, "utf-8");
 
-// One command does it all: generates keys, builds manifest, signs it
+// One command does it all: generates keys, builds the manifest, signs the envelope
 const result = await protect({
   directory: "./demo-package",
   mode: "sign",
   packageName: "code-review-skills",
-  version: "1.0.0",
+  version: 1,
+  displayVersion: "1.0.0",
   publisherName: "YourName",
 });
 
@@ -353,8 +365,7 @@ if (result.keyGenerated) {
   console.log(`Generated keypair — fingerprint: ${result.keyResult!.fingerprint}`);
   console.log(`Share your public key: ${result.keyResult!.publicKeyPath}`);
 }
-console.log(`Manifest: ${result.buildResult!.manifestPath}`);
-console.log(`Signature: ${result.signResult!.signaturePath}`);
+console.log(`Envelope: ${result.signResult!.envelopePath}`);
 
 // Verify everything is correct before distributing
 const check = await verify({ directory: "./demo-package" });
@@ -364,13 +375,13 @@ for (const f of check.fileResults) {
 }
 
 // Distribute: ./demo-package/ now contains:
-//   SKILL.md, RULES.md, manifest.json, manifest.sig.json
-//   Share tcv-public.key separately (website, README, key server)
+//   SKILL.md, RULES.md, contextlock.dsse.json
+//   Share contextlock-public.key separately (website, README, key server)
 ```
 
 **What to distribute:**
-- The package directory (SKILL.md, RULES.md, manifest.json, manifest.sig.json)
-- Your public key file (tcv-public.key) through a separate trusted channel
+- The package directory (SKILL.md, RULES.md, contextlock.dsse.json)
+- Your public key file (contextlock-public.key) through a separate trusted channel
 
 ---
 
@@ -386,7 +397,7 @@ import { trustAdd, userVerify, trustList } from "@contextlock/cli-user";
 // Step 1: Add the publisher's public key to your trust store
 // (You got the public key file from the publisher's website or docs)
 const addResult = await trustAdd({
-  publicKeyPath: "./downloaded/tcv-public.key",
+  publicKeyPath: "./downloaded/contextlock-public.key",
   publisherName: "Acme Security",
   trustStorePath: "./my-truststore.json",
 });
@@ -1087,69 +1098,96 @@ Add custom patterns for your tool's instruction files as needed.
 
 | Status | Meaning | Typical Action |
 |--------|---------|----------------|
-| `trusted` | Signature valid, hash matches, publisher trusted | Allow |
-| `modified` | Signature valid but file content changed since signing | Block |
-| `untrusted` | No manifest, unknown signer, or signature invalid | Warn or block |
+| `trusted` | Signature valid, rollback + expiry checks pass, hash matches | Allow |
+| `sealed` | Locally pinned via Mode 0 (trust-on-first-use), bytes unchanged | Allow |
+| `sealed+trusted` | Both a valid local seal and a valid publisher signature | Allow |
+| `modified` | File content (or length) changed since sealing/signing | Block |
+| `untrusted` | No envelope, unknown signer, or file not listed in manifest | Warn or block |
 | `revoked` | Signing key has been revoked in trust store | Block |
 | `expired` | Manifest past its `expires_at` date | Warn or block (configurable) |
-| `error` | Parse failure, I/O error, or other verification problem | Block |
+| `rollback` | Manifest version older than the highest already seen (T7) | Block |
+| `error` | Parse failure, I/O error, bad payloadType, corrupt local state | Block |
+| `seal-store-unavailable` | Seal store corrupt or signature-invalid (possible tampering) | Block |
 
 ---
 
-## File Formats
+## File Formats (v2)
 
-### Package Layout (Model A — Sidecar)
+### Package Layout
 
 ```
 my-package/
-├── SKILL.md              # Protected file
-├── RULES.md              # Protected file
-├── manifest.json         # tcv-manifest/v1
-└── manifest.sig.json     # tcv-signature/v1
+├── SKILL.md               # Protected file
+├── RULES.md               # Protected file
+└── contextlock.dsse.json  # DSSE envelope containing the contextlock/2 manifest
 ```
 
-### manifest.json
+One file replaces v1's two. Use `contextlock inspect` to pretty-print the payload.
+
+### contextlock.dsse.json (DSSE v1.0.2 envelope)
 
 ```json
 {
-  "schema": "tcv-manifest/v1",
+  "payload": "<base64(manifest JSON bytes)>",
+  "payloadType": "application/vnd.contextlock.manifest+json",
+  "signatures": [{ "keyid": "cl-acme-2026", "sig": "<base64>" }]
+}
+```
+
+The signature is Ed25519 over `PAE(payloadType, payload)`. The `keyid` is an
+unauthenticated hint — trust resolution tries pinned keys; the hint only
+orders candidates. Verifiers consume the manifest from the verified payload
+bytes, never from a sidecar file.
+
+### Manifest payload (`contextlock/2`)
+
+```json
+{
+  "spec_version": "contextlock/2",
   "package": "acme-secure-skills",
-  "version": "1.0.0",
-  "publisher": {
-    "name": "Acme Security",
-    "key_id": "c8e4b7d5f9c2...",
-    "public_key_fingerprint": "c8e4b7d5f9c2..."
-  },
-  "published_at": "2026-04-07T12:00:00.000Z",
-  "expires_at": "2027-04-07T12:00:00.000Z",
+  "version": 7,
+  "display_version": "1.2.0",
+  "publisher": { "name": "Acme Security", "key_id": "cl-acme-2026" },
+  "published_at": "2026-07-14T12:00:00Z",
+  "expires_at": "2027-07-14T12:00:00Z",
   "files": [
-    { "path": "SKILL.md", "sha256": "a3f5c9e8...", "size": 1842 },
-    { "path": "RULES.md", "sha256": "c18be2f4...", "size": 722 }
-  ]
+    { "path": "SKILL.md",  "sha256": "a3f5c9...", "length": 18432 },
+    { "path": "RULES.md",  "sha256": "c18be2...", "length": 7221 }
+  ],
+  "lints": { "unicode_tags": "absent", "bidi_controls": "absent", "zero_width": "absent" }
 }
 ```
 
-### manifest.sig.json
+Hard validation failures: non-integer `version`, missing `expires_at`, path
+traversal / absolute / backslash / duplicate paths, malformed hashes, missing
+`length`. Unknown fields are ignored (forward compatibility).
+
+### Root of trust (`contextlock-root/1`, in a DSSE envelope)
 
 ```json
 {
-  "schema": "tcv-signature/v1",
-  "manifest_sha256": "d4e5f6a7...",
-  "algorithm": "Ed25519",
-  "key_id": "c8e4b7d5f9c2...",
-  "signature": "base64url-encoded-signature"
+  "spec_version": "contextlock-root/1",
+  "version": 2,
+  "expires_at": "2028-01-01T00:00:00Z",
+  "keys": { "cl-acme-2026": { "alg": "ed25519", "pub": "<base64url raw 32B>" } },
+  "threshold": 1
 }
 ```
 
-### tcv-truststore.json
+Rotation: version exactly N+1, signed by a threshold of BOTH the old and new
+root's keys (the DSSE envelope carries multiple signatures natively). Rotation
+resets the anti-rollback baseline for the publisher (fast-forward recovery).
+
+### truststore.json (`contextlock-truststore/2`, local state)
 
 ```json
 {
-  "schema": "tcv-truststore/v1",
+  "schema": "contextlock-truststore/2",
+  "roots": { "Acme Security": { "spec_version": "contextlock-root/1", "...": "..." } },
   "trusted_publishers": [
     {
       "publisher": "Acme Security",
-      "key_id": "c8e4b7d5f9c2...",
+      "key_id": "cl-acme-2026",
       "public_key": "base64-encoded-ed25519-public-key",
       "fingerprint": "c8e4b7d5f9c2...",
       "revoked": false,
@@ -1159,9 +1197,15 @@ my-package/
         "allow_offline_cached_manifest": true
       }
     }
-  ]
+  ],
+  "sig": { "key_fingerprint": "…", "signature": "…" }
 }
 ```
+
+Local state (trust store, seal store, anti-rollback state) lives in
+`~/.contextlock/` and is signed with the machine-local key; a corrupt or
+hand-edited store fails CLOSED and loud. Legacy `tcv-truststore/v1` stores
+load with a warning and upgrade on the next save.
 
 ---
 
@@ -1169,15 +1213,25 @@ my-package/
 
 ### What ContextLock defends against
 
-- Local tampering of instruction files after download
+- Local tampering of instruction files after download or review
+- Prompt-injection persistence (an agent editing its own instruction files)
 - Malicious mirrors serving altered files
 - Repository compromise (without signing key compromise)
+- Rollback: replaying an older, vulnerable signed release (monotonic version + local state)
+- Freeze: withholding updates indefinitely (mandatory `expires_at`)
+- Mix-and-match: combining files from different releases (one manifest per trust boundary)
+- Cross-package confusion and manifest path abuse (bounded discovery, path validation)
+- Manifest stripping (protected files without evidence are loud, never silent)
+- Invisible Unicode smuggling (exact-byte hashing + sign-time content lints)
 - Accidental file corruption
 - Spoofed files impersonating trusted publishers
 
+The full threat model, including what each mechanism does and does not
+guarantee, is SPEC.md section 4.
+
 ### What ContextLock does not defend against
 
-- Compromised publisher private keys
+- Compromised publisher private keys (mitigated by rotation and revocation, not prevented)
 - Malicious content signed by a trusted publisher
 - Tool bypasses that disable verification hooks
 - OS-level compromise on the user's machine

@@ -1,7 +1,6 @@
 /**
- * Integration test: Full publisher flow
- * init-key → build-manifest → sign-manifest → verify (all pass)
- * Requirements: 10, 11, 12, 19
+ * Integration test: Full publisher flow (v2)
+ * init-key → build-manifest → sign-manifest (DSSE) → verify (all pass)
  */
 
 import { describe, it, expect, afterEach } from "vitest";
@@ -26,38 +25,42 @@ describe("Integration: Full publisher flow", () => {
     // 1. Generate keypair
     const keyResult = await initKey({ output: tempDir });
     expect(keyResult.fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(keyResult.keyId).toMatch(/^cl-[0-9a-f]{8}$/);
 
     // 2. Create protected files
     await writeFile(join(tempDir, "SKILL.md"), "# My Skill\nDo amazing things.", "utf-8");
     await writeFile(join(tempDir, "RULES.md"), "# Rules\n1. Be safe.\n2. Be correct.", "utf-8");
 
-    // 3. Build manifest
+    // 3. Build manifest (contextlock/2)
     const buildResult = await buildManifest({
       directory: tempDir,
       packageName: "my-package",
-      version: "1.0.0",
+      version: 1,
+      displayVersion: "1.0.0",
       publisherName: "IntegrationTester",
-      keyId: keyResult.fingerprint,
-      fingerprint: keyResult.fingerprint,
+      keyId: keyResult.keyId,
     });
 
     expect(buildResult.fileCount).toBe(2);
-    expect(buildResult.manifest.schema).toBe("tcv-manifest/v1");
+    expect(buildResult.manifest.spec_version).toBe("contextlock/2");
+    expect(buildResult.manifest.expires_at).toBeDefined();
+    expect(buildResult.manifest.lints).toBeDefined();
 
-    // 4. Sign manifest
+    // 4. Sign manifest into the DSSE envelope
     const sigResult = await signManifest({
       manifestPath: buildResult.manifestPath,
       privateKeyPath: keyResult.privateKeyPath,
     });
 
-    expect(sigResult.signature.schema).toBe("tcv-signature/v1");
-    expect(sigResult.keyId).toBe(keyResult.fingerprint);
+    expect(sigResult.envelopePath).toContain("contextlock.dsse.json");
+    expect(sigResult.keyId).toBe(keyResult.keyId);
+    expect(sigResult.fingerprint).toBe(keyResult.fingerprint);
 
-    // 5. Verify — all files should pass
+    // 5. Verify — signature + all files should pass
     const verifyResult = await verify({ directory: tempDir });
     expect(verifyResult.success).toBe(true);
-    expect(verifyResult.manifestFound).toBe(true);
-    expect(verifyResult.signatureFound).toBe(true);
+    expect(verifyResult.envelopeFound).toBe(true);
+    expect(verifyResult.signatureValid).toBe(true);
     expect(verifyResult.fileResults.every((f) => f.status === "ok")).toBe(true);
   });
 
@@ -70,10 +73,9 @@ describe("Integration: Full publisher flow", () => {
     const buildResult = await buildManifest({
       directory: tempDir,
       packageName: "mod-test",
-      version: "1.0.0",
+      version: 1,
       publisherName: "Tester",
-      keyId: keyResult.fingerprint,
-      fingerprint: keyResult.fingerprint,
+      keyId: keyResult.keyId,
     });
 
     await signManifest({
@@ -81,7 +83,7 @@ describe("Integration: Full publisher flow", () => {
       privateKeyPath: keyResult.privateKeyPath,
     });
 
-    // Tamper
+    // Tamper (same byte length, different content)
     await writeFile(join(tempDir, "SKILL.md"), "TAMPERED content", "utf-8");
 
     const verifyResult = await verify({ directory: tempDir });

@@ -37,7 +37,7 @@ describe("Integration: Cache and offline verification", () => {
     await cache.save();
 
     // Verify cache has the entry
-    const entry = cache.get("integration-test-pkg", "1.0.0", pkg.kp.fingerprint);
+    const entry = cache.get("integration-test-pkg", 1, pkg.kp.fingerprint);
     expect(entry).toBeDefined();
     expect(entry!.manifest.package).toBe("integration-test-pkg");
 
@@ -68,7 +68,15 @@ describe("Integration: Cache and offline verification", () => {
     const cache = new ManifestCache("dummy.json");
     expect(() =>
       cache.put({
-        manifest: { schema: "tcv-manifest/v1", package: "x", version: "1.0.0", publisher: { name: "a", key_id: "b", public_key_fingerprint: "c" }, published_at: new Date().toISOString(), files: [] },
+        manifest: {
+          spec_version: "contextlock/2",
+          package: "x",
+          version: 1,
+          publisher: { name: "a", key_id: "b" },
+          published_at: new Date().toISOString(),
+          expires_at: "2030-01-01T00:00:00Z",
+          files: [],
+        },
         fetchedAt: new Date().toISOString(),
         fingerprint: "abc",
         verified: false,

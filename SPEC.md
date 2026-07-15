@@ -105,7 +105,7 @@ The full supply-chain layer: a publisher signs a manifest covering every file in
 - **Profile A (baseline, mandatory to implement): raw Ed25519 keys.** 32-byte keys, base64url, minisign-style short key IDs. Works offline, no accounts, no OAuth ceremony, suitable for solo skill authors. This is also literally what OWASP AST01 asks for.
 - **Profile B (optional, v2.1+): Sigstore keyless.** DSSE envelope inside a Sigstore bundle; identity policy expressed as `certificate-identity` + `certificate-oidc-issuer` (exactly the model npm provenance trained developers on). Ideal for CI-published packages. Verification is fully offline given a v0.3 bundle and a pinned `trusted_root.json` shipped with CLI releases. Signing is never offline (OIDC + Fulcio + Rekor round-trips), which is why Profile A remains the baseline.
 
-The engine treats modes as evidence sources feeding one verdict: `sealed`, `trusted` (signed), `sealed+trusted`, `modified`, `untrusted`, `revoked`, `expired`, `error`, or `unprotected`.
+The engine treats modes as evidence sources feeding one verdict: `sealed`, `trusted` (signed), `sealed+trusted`, `modified`, `untrusted`, `revoked`, `expired`, `rollback` (an older signed manifest replayed after a newer one was seen - blocks under strict and balanced, like `revoked`), `error`, or `unprotected`.
 
 ## 6. Cryptographic format (v2)
 
@@ -162,7 +162,7 @@ One signed manifest per trust boundary, fusing TUF's targets and snapshot roles 
 
 Validation rules (all hard failures):
 
-- `version` is a **monotonic integer**, not semver. The verifier keeps per-`(package, key)` highest-version-seen state and rejects `version <= last_seen` (T7 rollback). `display_version` is informational only.
+- `version` is a **monotonic integer**, not semver. The verifier keeps per-`(package, key)` highest-version-seen state and rejects `version < last_seen` (T7 rollback; equality is accepted so the installed release re-verifies on every load). The state file (`~/.contextlock/state.json`) is signed local state per section 8: corrupt or hand-edited state fails closed. `display_version` is informational only.
 - `expires_at` is **required** (T8 freeze). See 6.4.
 - `path` entries: relative, forward slashes, no `..` segments, no absolute paths, no duplicates, must resolve inside the manifest's directory (T10, T11).
 - `length` is enforced before hashing (endless-data defense, free with the read).
@@ -188,7 +188,8 @@ Publishers who outgrow a single key publish a minimal root file (TUF root role, 
 }
 ```
 
-- A new root version must be signed by a **threshold of both the old and the new keys**, version exactly N+1 (the TUF rotation chain). Threshold defaults to 1 so solo authors feel no ceremony; orgs raise it.
+- The root ships inside a DSSE envelope (`contextlock.root.dsse.json`, payloadType `application/vnd.contextlock.root+json`); the envelope's native multi-signature support carries the rotation signatures.
+- A new root version must be signed by a **threshold of both the old and the new keys**, version exactly N+1 (the TUF rotation chain). Threshold defaults to 1 so solo authors feel no ceremony; orgs raise it. The initial pin (`contextlock trust root add`) is trust-on-first-use and verifies self-consistency (the root's own threshold with its own keys).
 - **Fast-forward recovery**: on key rotation, the verifier resets its highest-version-seen baseline for that publisher (the TUF §5.3.11 escape hatch). `contextlock trust reset <publisher>` exposes the same manually.
 - Key hygiene guidance: root key offline and rare; manifest signing key routine. Solo authors may use one key; the format does not force the split, the docs recommend it.
 - Deliberately **not** adopted from TUF: snapshot/timestamp as separate roles (meaningless without a repository server), delegations, consistent snapshots. Precedent: Sigstore uses full TUF only to update one file; Go's sumdb rejected TUF outright for a simpler design. Minimal on purpose, with the reasoning recorded.
@@ -197,7 +198,7 @@ Publishers who outgrow a single key publish a minimal root file (TUF root role, 
 
 - **Ed25519 + SHA-256 only in v1 of the format.** No algorithm agility, no `alg` headers (the verifier's trust config decides the algorithm; this kills alg-confusion by construction, one of DSSE's design points).
 - Key format: **raw 32-byte Ed25519 keys, base64url**, with short minisign-style key IDs. PEM/JWK are import/export conveniences in tooling, never the wire format.
-- Reference implementation: `node:crypto` (`crypto.sign(null, ...)`, `crypto.verify(null, ...)`, `createHash('sha256')`), zero runtime dependencies, baseline **Node >= 22.13.0** (WebCrypto Ed25519 stable). `@noble/ed25519` (already a dependency) remains the portability fallback for non-Node runtimes.
+- Reference implementation: `node:crypto` (`crypto.sign(null, ...)`, `crypto.verify(null, ...)`, `createHash('sha256')`), zero runtime dependencies, baseline **Node >= 22.13.0** (WebCrypto Ed25519 stable). `@noble/ed25519` (already a dependency) remains the portability fallback for non-Node runtimes. *Implementation status (Phase B): the shipped code still uses `@noble/ed25519`+`@noble/hashes` end to end - swapping the primitive layer to `node:crypto` is a self-contained cleanup, not a format change, since keys, signatures, and hashes are byte-identical.*
 
 ### 6.7 Sign-time content lints
 
@@ -365,11 +366,11 @@ Everything not listed (hashing primitives, Ed25519 via noble, trust-store CRUD, 
 
 ## 14. Roadmap
 
-**Phase A - Local Seal + real enforcement (the credibility release).**
-Mode 0 end to end: seal store, machine-local key, `seal/reseal/status/sweep`, the actual Claude Code plugin (hooks.json, deny-rule templates, managed template), exact-byte hashing migration, trust-store hardening, U1-U4 empirical results published. Acceptance: the demo where an "injected" agent appends a line to CLAUDE.md and the next session blocks, quarantines, and reports it.
+**Phase A - Local Seal + real enforcement (the credibility release). SHIPPED 2026-07-15.**
+Mode 0 end to end: seal store, machine-local key, `seal/reseal/status/sweep`, the actual Claude Code plugin (hooks.json, deny-rule templates, managed template), exact-byte hashing migration, trust-store hardening, U1-U4 empirical results published. Acceptance: the demo where an "injected" agent appends a line to CLAUDE.md and the next session blocks, quarantines, and reports it. (Passed live.)
 
-**Phase B - Signed manifests v2.**
-DSSE envelope, `contextlock/2` manifest, anti-rollback state, root/rotation, content lints, publisher CLI updates, `contextlock install`. Acceptance: v1's five MVP criteria re-run on the v2 format, plus rollback and manifest-stripping red-team tests.
+**Phase B - Signed manifests v2. SHIPPED 2026-07-15.**
+DSSE envelope, `contextlock/2` manifest, anti-rollback state, root/rotation, content lints, publisher CLI updates, `contextlock install`. Acceptance: v1's five MVP criteria re-run on the v2 format (`tests/integration/mvp-v2.test.ts`), plus rollback, manifest-stripping, mix-and-match, cross-package, sidecar-differential, and keyid-spoofing red-team tests (`tests/integration/redteam-v2.test.ts`).
 
 **Phase C - Ecosystem profiles.**
 Sigstore Profile B (bundle verification against pinned trusted root), OpenClaw adapter (highest urgency given ClawHavoc), reviewer multi-signatures, CI signing recipes (GitHub Actions).
@@ -383,7 +384,7 @@ Carried forward, now with owners in the process rather than rhetorical status:
 
 1. ~~U1-U4~~ Resolved 2026-07-14 (section 7.4, `docs/claude-code-surface.md`). Follow-up: remote-source marketplace cache behavior; re-run the surface tests per Claude Code release.
 2. ~~Keep or rename~~ Resolved: keep (section 12); trademark search still outstanding.
-3. Sign in-toto Statements (nono-compatible) vs bare manifest payload in DSSE - leaning Statement-with-ContextLock-predicate for ecosystem reuse; decide in Phase B design.
+3. ~~Sign in-toto Statements vs bare manifest payload~~ Resolved in Phase B (2026-07-15): **bare manifest payload** with the dedicated payloadType, as normatively specified in 6.2/6.3. Rationale: (a) an in-toto Statement duplicates the file list in `subject`, creating a second authority that must be cross-validated against the predicate - new attack surface for zero security gain; (b) the DSSE payloadType makes the formats cleanly distinguishable, so a Statement profile can be ADDED later without breaking existing verifiers (old verifiers reject the unknown payloadType loudly, never silently); (c) the natural home for Statement interop is Phase C's Sigstore Profile B, where bundles carry Statements natively and nono compatibility can be tested against a real counterparty rather than guessed at. This resolution reverses the earlier "leaning Statement" note - revisit at Phase C with concrete nono interop tests.
 4. Quarantine UX: move-aside + placeholder vs rename-in-place - Phase A usability test.
 5. Seal-store scaling (JSON vs SQLite) once seals exceed ~10^3 files - defer until real.
 
