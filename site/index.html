@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ContextLock — integrity &amp; provenance for AI instruction files</title>
+<meta name="description" content="ContextLock gives AI agent instruction files (SKILL.md, CLAUDE.md, rules, prompt packs) the same authenticity and integrity guarantees the software world expects of packages and binaries — verified before they reach the model. Ed25519 + Sigstore keyless, Apache-2.0." />
+<link rel="canonical" href="https://contextlock.net/" />
+
+<!-- Open Graph / social -->
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://contextlock.net/" />
+<meta property="og:title" content="ContextLock — make the mutable verifiable" />
+<meta property="og:description" content="Cryptographic integrity and provenance for the files that program your AI agent. Verified before they reach the model." />
+<meta property="og:site_name" content="ContextLock" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="ContextLock — make the mutable verifiable" />
+<meta name="twitter:description" content="Cryptographic integrity and provenance for the files that program your AI agent." />
+
+<!-- Brass seal favicon (inline SVG) -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230B1416'/%3E%3Cg fill='none' stroke='%23CBA04A' stroke-width='1.3'%3E%3Ccircle cx='16' cy='16' r='11'/%3E%3Ccircle cx='16' cy='16' r='8'/%3E%3C/g%3E%3Cpath d='M12 12h2v8h-2z M18 12h2v8h-2z' fill='%23CBA04A'/%3E%3C/svg%3E" />
+
+<style>
+/* ============================================================
+   ContextLock — "Certificate of Provenance"
+   Tokens: light default (:root), dark via media query,
+   both overridable by [data-theme] stamped on <html>.
+   ============================================================ */
+:root {
+  --bg:            #F4F1E9;
+  --bg-raised:     #FBF9F3;
+  --bg-sunken:     #EBE5D6;
+  --fg:            #1A2422;
+  --fg-muted:      #56635F;
+  --fg-faint:      #8A938E;
+  --brass:         #8E6412;
+  --brass-bright:  #A9791F;
+  --hairline:      #D9D0BC;
+  --hairline-strong:#C4B99E;
+  --ok:            #237A50;
+  --bad:           #B23127;
+  --warn:          #9A6414;
+  --on-brass:      #FBF9F3;
+  --seal:          rgba(142,100,18,0.055);
+  --shadow:        0 1px 0 rgba(26,36,34,0.04), 0 18px 40px -28px rgba(26,36,34,0.35);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:            #0B1416;
+    --bg-raised:     #101E21;
+    --bg-sunken:     #070F11;
+    --fg:            #E9E4D6;
+    --fg-muted:      #93A19D;
+    --fg-faint:      #5E6D6A;
+    --brass:         #CBA04A;
+    --brass-bright:  #E3BB63;
+    --hairline:      #223133;
+    --hairline-strong:#324548;
+    --ok:            #4FB286;
+    --bad:           #E5595C;
+    --warn:          #E0913B;
+    --on-brass:      #0B1416;
+    --seal:          rgba(203,160,74,0.05);
+    --shadow:        0 1px 0 rgba(0,0,0,0.4), 0 30px 60px -30px rgba(0,0,0,0.7);
+    color-scheme: dark;
+  }
+}
+/* Explicit toggle overrides (must beat the media query both ways) */
+:root[data-theme="light"] {
+  --bg:#F4F1E9; --bg-raised:#FBF9F3; --bg-sunken:#EBE5D6;
+  --fg:#1A2422; --fg-muted:#56635F; --fg-faint:#8A938E;
+  --brass:#8E6412; --brass-bright:#A9791F;
+  --hairline:#D9D0BC; --hairline-strong:#C4B99E;
+  --ok:#237A50; --bad:#B23127; --warn:#9A6414; --on-brass:#FBF9F3;
+  --seal:rgba(142,100,18,0.055);
+  --shadow:0 1px 0 rgba(26,36,34,0.04), 0 18px 40px -28px rgba(26,36,34,0.35);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg:#0B1416; --bg-raised:#101E21; --bg-sunken:#070F11;
+  --fg:#E9E4D6; --fg-muted:#93A19D; --fg-faint:#5E6D6A;
+  --brass:#CBA04A; --brass-bright:#E3BB63;
+  --hairline:#223133; --hairline-strong:#324548;
+  --ok:#4FB286; --bad:#E5595C; --warn:#E0913B; --on-brass:#0B1416;
+  --seal:rgba(203,160,74,0.05);
+  --shadow:0 1px 0 rgba(0,0,0,0.4), 0 30px 60px -30px rgba(0,0,0,0.7);
+  color-scheme: dark;
+}
+
+:root {
+  --mono: ui-monospace, "SFMono-Regular", "SF Mono", "Cascadia Mono", "Cascadia Code", "JetBrains Mono", "Roboto Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "Hoefler Text", Cambria, Georgia, serif;
+  --measure: 62ch;
+  --edge: clamp(20px, 5vw, 72px);
+  --maxw: 1160px;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--serif);
+  font-size: 17px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+::selection { background: var(--brass); color: var(--bg); }
+
+a { color: var(--brass); text-decoration: none; }
+a:hover { color: var(--brass-bright); }
+:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; border-radius: 1px; }
+
+h1, h2, h3, .mono, .eyebrow, code, kbd, nav, .badge, .btn, .stat, th, .ledger, .field-k, .pill { font-family: var(--mono); }
+h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; margin: 0; }
+
+.wrap { max-width: var(--maxw); margin-inline: auto; padding-inline: var(--edge); }
+.eyebrow {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.19em;
+  color: var(--fg-faint); display: inline-flex; gap: 0.55em; align-items: baseline;
+}
+.eyebrow .sec { color: var(--brass); }
+.rule { height: 1px; background: var(--hairline); border: 0; }
+
+/* ---------- top bar ---------- */
+header.bar {
+  position: sticky; top: 0; z-index: 50;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--hairline);
+}
+.bar .wrap { display: flex; align-items: center; gap: 1.4rem; height: 60px; }
+.brand { display: inline-flex; align-items: center; gap: 0.6rem; font-family: var(--mono); font-weight: 600; letter-spacing: -0.01em; color: var(--fg); }
+.brand:hover { color: var(--fg); }
+.brand svg { display: block; }
+.brand .lo { color: var(--fg-faint); }
+.brand b { color: var(--brass); font-weight: 600; }
+nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.35rem; font-size: 0.82rem; }
+nav.top a { color: var(--fg-muted); }
+nav.top a:hover { color: var(--fg); }
+.bar-actions { display: flex; align-items: center; gap: 0.75rem; }
+.iconbtn {
+  display: inline-grid; place-items: center; width: 34px; height: 34px;
+  border: 1px solid var(--hairline); background: transparent; color: var(--fg-muted);
+  border-radius: 2px; cursor: pointer;
+}
+.iconbtn:hover { color: var(--brass); border-color: var(--hairline-strong); }
+@media (max-width: 860px) { nav.top { display: none; } }
+
+/* ---------- shared bits ---------- */
+.pill {
+  display: inline-flex; align-items: center; gap: 0.5em;
+  font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 0.28em 0.66em; border: 1px solid var(--hairline-strong);
+  border-radius: 2px; color: var(--fg-muted); background: var(--bg-raised);
+}
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+@media (prefers-reduced-motion: no-preference){ .dot.live { animation: pulse 2.6s ease-in-out infinite; } }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 0.55em; cursor: pointer;
+  font-size: 0.86rem; letter-spacing: 0.01em; padding: 0.72em 1.15em;
+  border-radius: 2px; border: 1px solid var(--hairline-strong);
+  color: var(--fg); background: var(--bg-raised); transition: border-color .15s, transform .05s, background .15s;
+}
+.btn:hover { border-color: var(--brass); color: var(--fg); }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--brass); color: var(--on-brass); border-color: var(--brass); font-weight: 600; }
+.btn.primary:hover { background: var(--brass-bright); border-color: var(--brass-bright); }
+.btn svg { width: 15px; height: 15px; }
+
+/* copy-command chip */
+.cmd {
+  display: inline-flex; align-items: center; gap: 0.75rem;
+  font-family: var(--mono); font-size: 0.86rem;
+  border: 1px solid var(--hairline-strong); border-radius: 2px;
+  background: var(--bg-sunken); color: var(--fg); padding: 0.62em 0.7em 0.62em 0.9em;
+}
+.cmd .pfx { color: var(--brass); }
+.cmd button {
+  font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
+  border: 1px solid var(--hairline-strong); background: transparent; color: var(--fg-muted);
+  padding: 0.35em 0.6em; border-radius: 2px; cursor: pointer; white-space: nowrap;
+}
+.cmd button:hover { color: var(--brass); border-color: var(--brass); }
+
+/* ---------- section scaffolding ---------- */
+section { position: relative; }
+.band { padding-block: clamp(56px, 8vw, 104px); border-top: 1px solid var(--hairline); }
+.band-head { max-width: 720px; margin-bottom: clamp(28px, 4vw, 48px); }
+.band-head h2 { font-size: clamp(1.55rem, 3vw, 2.3rem); margin-top: 0.7rem; line-height: 1.08; }
+.band-head p { color: var(--fg-muted); margin: 0.9rem 0 0; max-width: var(--measure); }
+.lede { font-size: 1.14rem; }
+
+/* ---------- hero ---------- */
+.hero { padding-top: clamp(48px, 7vw, 92px); padding-bottom: clamp(40px, 6vw, 80px); position: relative; overflow: hidden; }
+.hero-grid { display: grid; grid-template-columns: 1.02fr 1fr; gap: clamp(28px, 4vw, 60px); align-items: center; }
+@media (max-width: 940px){ .hero-grid { grid-template-columns: 1fr; } }
+.hero h1 {
+  font-size: clamp(2.15rem, 5.4vw, 4rem); line-height: 1.02; letter-spacing: -0.025em;
+  margin-top: 1.1rem;
+}
+.hero h1 em { font-style: normal; color: var(--brass); }
+.hero .sub { font-size: 1.16rem; color: var(--fg-muted); margin: 1.35rem 0 0; max-width: 40ch; }
+.hero .sub b { color: var(--fg); font-weight: 400; font-family: var(--mono); font-size: 0.94em; }
+.hero-cta { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.9rem; align-items: center; }
+.trust-strip {
+  display: flex; flex-wrap: wrap; gap: 0.5rem 1.4rem; margin-top: 2rem;
+  font-family: var(--mono); font-size: 0.74rem; color: var(--fg-faint); letter-spacing: 0.02em;
+}
+.trust-strip span { display: inline-flex; align-items: center; gap: 0.5em; }
+.trust-strip span::before { content: ""; width: 4px; height: 4px; border-radius: 50%; background: var(--brass); opacity: 0.8; }
+
+/* seal watermark behind hero */
+.seal-mark {
+  position: absolute; right: -8%; top: 50%; transform: translateY(-50%);
+  width: min(680px, 62vw); aspect-ratio: 1; pointer-events: none; z-index: 0;
+  color: var(--seal);
+}
+@media (max-width: 940px){ .seal-mark { right: -30%; opacity: 0.7; } }
+.hero-grid > * { position: relative; z-index: 1; }
+
+/* ---------- terminal / verification ledger ---------- */
+.term {
+  border: 1px solid var(--hairline-strong); border-radius: 4px;
+  background: var(--bg-sunken); box-shadow: var(--shadow); overflow: hidden;
+}
+.term-bar {
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.85rem;
+  border-bottom: 1px solid var(--hairline); background: var(--bg-raised);
+  font-family: var(--mono); font-size: 0.74rem; color: var(--fg-faint);
+}
+.term-bar .tdot { width: 9px; height: 9px; border-radius: 50%; background: var(--hairline-strong); }
+.term-bar .name { margin-left: auto; letter-spacing: 0.04em; }
+.term-body {
+  font-family: var(--mono); font-size: 0.8rem; line-height: 1.75;
+  padding: 1rem 1.1rem 1.15rem; min-height: 340px;
+  white-space: pre-wrap; word-break: break-word;
+}
+.term-body .ln { display: block; }
+.term-body .cmd-ln { color: var(--fg); }
+.term-body .cmd-ln .pr { color: var(--brass); }
+.term-body .mut { color: var(--fg-faint); }
+.term-body .key { color: var(--fg-muted); }
+.term-body .ok { color: var(--ok); }
+.term-body .bad { color: var(--bad); }
+.term-body .warnc { color: var(--warn); }
+.term-body .hash { color: var(--fg-muted); }
+.verdict {
+  display: inline-flex; align-items: center; gap: 0.5em; margin-top: 0.2em;
+  padding: 0.15em 0.6em; border-radius: 2px; font-weight: 600; letter-spacing: 0.02em;
+}
+.verdict.t-ok { color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.verdict.t-bad { color: var(--bad); border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.cursor { display:inline-block; width:0.6ch; background:var(--brass); color:transparent; animation: blink 1.05s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce){ .cursor { animation: none; } }
+
+/* ---------- incident ledger ---------- */
+.two-col { display: grid; grid-template-columns: 1.1fr 1fr; gap: clamp(28px, 4vw, 56px); align-items: start; }
+@media (max-width: 900px){ .two-col { grid-template-columns: 1fr; } }
+.prose p { max-width: var(--measure); }
+.prose p + p { margin-top: 1.05rem; }
+.prose strong { font-family: var(--mono); font-weight: 600; font-size: 0.94em; }
+
+.ledger {
+  border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden;
+  background: var(--bg-raised); font-family: var(--mono);
+}
+.ledger .row { display: grid; grid-template-columns: auto 1fr; gap: 0.9rem; padding: 0.9rem 1rem; border-top: 1px solid var(--hairline); }
+.ledger .row:first-child { border-top: 0; }
+.ledger .yr { color: var(--brass); font-size: 0.74rem; letter-spacing: 0.04em; white-space: nowrap; padding-top: 0.15em; }
+.ledger .ev b { display: block; font-size: 0.86rem; color: var(--fg); font-weight: 600; }
+.ledger .ev span { display: block; font-family: var(--serif); font-size: 0.92rem; color: var(--fg-muted); margin-top: 0.15rem; line-height: 1.5; }
+.ledger .stat-big { font-size: 0.86rem; color: var(--bad); font-weight: 600; }
+
+blockquote.quote {
+  margin: 0; border-left: 2px solid var(--brass); padding: 0.2rem 0 0.2rem 1.15rem;
+}
+blockquote.quote p { font-family: var(--serif); font-size: 1.18rem; font-style: italic; color: var(--fg); margin: 0; max-width: 46ch; }
+blockquote.quote cite { display: block; font-family: var(--mono); font-style: normal; font-size: 0.74rem; letter-spacing: 0.06em; color: var(--fg-faint); margin-top: 0.7rem; text-transform: uppercase; }
+
+/* ---------- pipeline ---------- */
+.pipe { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden; }
+@media (max-width: 720px){ .pipe { grid-template-columns: 1fr; } }
+.pipe .lane { background: var(--bg-raised); padding: 1.3rem 1.4rem; }
+.pipe .lane h3 { font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--brass); margin-bottom: 0.9rem; }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; font-family: var(--mono); font-size: 0.82rem; }
+.steps li { display: flex; gap: 0.7rem; align-items: baseline; color: var(--fg-muted); }
+.steps li .n { color: var(--fg-faint); font-size: 0.72rem; min-width: 1.4em; }
+.steps li b { color: var(--fg); font-weight: 600; }
+.steps li em { font-style: normal; color: var(--fg-faint); }
+
+.verdicts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 1.4rem; }
+@media (max-width: 720px){ .verdicts { grid-template-columns: 1fr; } }
+.vcard { border: 1px solid var(--hairline); border-top-width: 2px; border-radius: 2px; padding: 1rem 1.05rem; background: var(--bg-raised); }
+.vcard.ok { border-top-color: var(--ok); }
+.vcard.bad { border-top-color: var(--bad); }
+.vcard.warn { border-top-color: var(--warn); }
+.vcard .st { font-family: var(--mono); font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 0.5em; }
+.vcard.ok .st { color: var(--ok); }
+.vcard.bad .st { color: var(--bad); }
+.vcard.warn .st { color: var(--warn); }
+.vcard p { margin: 0.5rem 0 0; font-size: 0.9rem; color: var(--fg-muted); }
+.vcard .pol { font-family: var(--mono); font-size: 0.72rem; color: var(--fg-faint); margin-top: 0.7rem; letter-spacing: 0.02em; }
+
+/* ---------- threat ledger (spec sheet) ---------- */
+.spec { border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden; }
+.spec .srow { display: grid; grid-template-columns: 4.2rem 1.15fr 1.35fr; border-top: 1px solid var(--hairline); }
+.spec .srow:first-child { border-top: 0; }
+.spec .srow > div { padding: 0.95rem 1.05rem; }
+.spec .srow .tid { font-family: var(--mono); font-size: 0.74rem; color: var(--brass); letter-spacing: 0.04em; }
+.spec .srow .threat { font-family: var(--serif); color: var(--fg); font-size: 0.98rem; border-left: 1px solid var(--hairline); }
+.spec .srow .mech { font-family: var(--mono); font-size: 0.8rem; color: var(--fg-muted); border-left: 1px solid var(--hairline); line-height: 1.55; }
+.spec .srow:hover { background: var(--bg-raised); }
+.spec .srow.head { background: var(--bg-sunken); }
+.spec .srow.head:hover { background: var(--bg-sunken); }
+.spec .srow.head > div { font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--fg-faint); font-style: normal; padding-block: 0.7rem; }
+@media (max-width: 760px){
+  .spec .srow { grid-template-columns: 3rem 1fr; }
+  .spec .srow .mech { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--hairline); }
+  .spec .head { display: none; }
+}
+
+/* ---------- trust models ---------- */
+.models { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+@media (max-width: 860px){ .models { grid-template-columns: 1fr; } }
+.model { border: 1px solid var(--hairline); border-radius: 3px; padding: 1.35rem 1.3rem; background: var(--bg-raised); display: flex; flex-direction: column; }
+.model .mno { font-family: var(--mono); font-size: 0.72rem; color: var(--brass); letter-spacing: 0.1em; text-transform: uppercase; }
+.model h3 { font-size: 1.02rem; margin-top: 0.55rem; }
+.model p { font-family: var(--serif); font-size: 0.95rem; color: var(--fg-muted); margin: 0.6rem 0 0; }
+.model .tag { margin-top: auto; padding-top: 1rem; font-family: var(--mono); font-size: 0.72rem; color: var(--fg-faint); }
+.model .tag b { color: var(--fg-muted); font-weight: 600; }
+
+/* ---------- quick start ---------- */
+.qs { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 860px){ .qs { grid-template-columns: 1fr; } }
+.codeblock { border: 1px solid var(--hairline-strong); border-radius: 4px; overflow: hidden; background: var(--bg-sunken); }
+.codeblock .cbhead { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--hairline); font-family: var(--mono); font-size: 0.74rem; color: var(--fg-muted); background: var(--bg-raised); }
+.codeblock .cbhead .who { margin-left: auto; color: var(--brass); letter-spacing: 0.05em; }
+.codeblock pre { margin: 0; padding: 1rem 1.1rem; overflow-x: auto; font-family: var(--mono); font-size: 0.8rem; line-height: 1.8; }
+.codeblock pre .pr { color: var(--brass); } .codeblock pre .c { color: var(--fg-faint); } .codeblock pre .ok { color: var(--ok); } .codeblock pre .bad { color: var(--bad); } .codeblock pre .s { color: var(--fg-muted); }
+
+/* ---------- ecosystem ---------- */
+.eco { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--hairline); border: 1px solid var(--hairline); border-radius: 3px; overflow: hidden; }
+@media (max-width: 860px){ .eco { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 460px){ .eco { grid-template-columns: 1fr; } }
+.eco .cell { background: var(--bg-raised); padding: 1.1rem 1.15rem; }
+.eco .cell b { font-family: var(--mono); font-size: 0.86rem; color: var(--fg); display: block; }
+.eco .cell span { font-family: var(--serif); font-size: 0.88rem; color: var(--fg-muted); display: block; margin-top: 0.3rem; line-height: 1.5; }
+.eco .cell.soon b::after { content: "planned"; font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--fg-faint); border: 1px solid var(--hairline-strong); border-radius: 2px; padding: 0.05em 0.4em; margin-left: 0.6em; vertical-align: middle; }
+
+/* ---------- honesty note ---------- */
+.honest { border: 1px solid var(--hairline-strong); border-radius: 4px; background: var(--bg-raised); padding: clamp(1.6rem, 3vw, 2.6rem); position: relative; }
+.honest .eyebrow { color: var(--brass); }
+.honest p { font-family: var(--serif); font-size: clamp(1.15rem, 2vw, 1.4rem); line-height: 1.5; max-width: 54ch; margin: 1rem 0 0; }
+.honest p em { color: var(--brass); font-style: italic; }
+
+/* ---------- final CTA ---------- */
+.finale { text-align: left; }
+.finale h2 { font-size: clamp(1.7rem, 3.6vw, 2.7rem); max-width: 20ch; }
+.finale .hero-cta { margin-top: 1.6rem; }
+
+/* ---------- footer ---------- */
+footer.colophon { border-top: 1px solid var(--hairline); padding-block: clamp(40px, 5vw, 64px); font-family: var(--mono); }
+.colophon-grid { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 28px; }
+@media (max-width: 760px){ .colophon-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 460px){ .colophon-grid { grid-template-columns: 1fr; } }
+.colophon h4 { font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-faint); margin: 0 0 0.9rem; font-weight: 600; }
+.colophon ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.84rem; }
+.colophon ul a { color: var(--fg-muted); }
+.colophon ul a:hover { color: var(--brass); }
+.colophon .meta { font-size: 0.74rem; color: var(--fg-faint); line-height: 1.7; }
+.colophon .meta b { color: var(--fg-muted); font-weight: 600; }
+.foot-bottom { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; margin-top: 2.4rem; padding-top: 1.4rem; border-top: 1px solid var(--hairline); font-size: 0.74rem; color: var(--fg-faint); }
+.disamb { font-family: var(--serif); font-size: 0.82rem; color: var(--fg-faint); max-width: var(--measure); margin-top: 1.4rem; line-height: 1.55; }
+
+/* utility */
+.nowrap { white-space: nowrap; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="ContextLock home">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
+        <g fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--brass)">
+          <circle cx="16" cy="16" r="12"/><circle cx="16" cy="16" r="8.5"/>
+        </g>
+        <path d="M12.5 13h2.2v6h-2.2z M17.3 13h2.2v6h-2.2z" fill="var(--brass)"/>
+      </svg>
+      <span class="lo">[</span>context<b>lock</b><span class="lo">]</span>
+    </a>
+    <nav class="top" aria-label="Primary">
+      <a href="#risk">The&nbsp;risk</a>
+      <a href="#how">How&nbsp;it&nbsp;works</a>
+      <a href="#guarantees">Guarantees</a>
+      <a href="#start">Quick&nbsp;start</a>
+      <a href="#ecosystem">Ecosystem</a>
+    </nav>
+    <div class="bar-actions">
+      <a class="btn" href="https://github.com/mindmodelai/contextlock" style="padding:.5em .8em;font-size:.8rem">GitHub</a>
+      <button class="iconbtn" id="theme" title="Toggle light / dark" aria-label="Toggle light or dark theme">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M22 12h-2.5M4.5 12H2M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8M18.4 18.4l-1.8-1.8M7.4 7.4L5.6 5.6"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<a id="top"></a>
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <svg class="seal-mark" viewBox="0 0 200 200" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="0.6">
+    <circle cx="100" cy="100" r="92"/><circle cx="100" cy="100" r="78"/><circle cx="100" cy="100" r="60"/>
+    <g stroke-width="0.5">
+      <!-- tick ring -->
+      <g id="ticks"></g>
+    </g>
+    <path d="M85 82h12v36H85z M103 82h12v36h-12z" stroke="none" fill="currentColor" opacity="0.6"/>
+  </svg>
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <span class="eyebrow"><span class="sec">◆</span> Integrity &amp; provenance for AI instruction files</span>
+      <h1>Your agent trusts its instructions. <em>Prove they haven&rsquo;t changed.</em></h1>
+      <p class="sub">A <b>SKILL.md</b>, <b>CLAUDE.md</b>, rules file or prompt pack steers a model with near&nbsp;system-prompt privilege &mdash; yet ships as plain markdown anything can silently edit. ContextLock gives those files the same authenticity and integrity guarantees software already expects of packages and binaries, checked <em style="font-style:normal;color:var(--fg)">before</em> they reach the model.</p>
+      <div class="hero-cta">
+        <div class="cmd">
+          <span><span class="pfx">$</span> npm i -g @contextlock/cli-user</span>
+          <button data-copy="npm i -g @contextlock/cli-user">Copy</button>
+        </div>
+        <a class="btn primary" href="#start">Quick start</a>
+      </div>
+      <div class="trust-strip">
+        <span>Apache-2.0</span>
+        <span>Ed25519 + Sigstore keyless</span>
+        <span>npm provenance-attested</span>
+        <span>375 tests</span>
+      </div>
+    </div>
+
+    <!-- live verification ledger -->
+    <div class="term" id="term" role="img" aria-label="Terminal demo: ContextLock verifies a signed file as trusted, then detects a tampered copy and blocks it.">
+      <div class="term-bar">
+        <span class="tdot"></span><span class="tdot"></span><span class="tdot"></span>
+        <span class="name">contextlock &mdash; verify</span>
+      </div>
+      <div class="term-body" id="termbody"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ THE RISK ============ -->
+<section class="band" id="risk">
+  <div class="wrap">
+    <div class="band-head">
+      <span class="eyebrow"><span class="sec">SPEC &sect;2</span> &mdash; Why this must exist</span>
+      <h2>Instruction files are executable in effect, but treated as data.</h2>
+    </div>
+    <div class="two-col">
+      <div class="prose">
+        <p class="lede">Git proves history, not provenance. A commit says &ldquo;this content entered this repo,&rdquo; never who authored it or whether it matches what a publisher released. The highest-value files &mdash; <strong>~/.claude/CLAUDE.md</strong>, global skills, plugin caches &mdash; live outside any repo entirely: mutable, invisible, implicitly trusted.</p>
+        <p>Worse, prompt injection can <em>persist</em>. An injected agent appends a line to its own <strong>CLAUDE.md</strong> and the compromise survives every future session &mdash; the agent-world equivalent of malware writing to a startup script. This is no longer hypothetical.</p>
+        <blockquote class="quote">
+          <p>&ldquo;Require cryptographic signatures (ed25519) on all published skills; reject unsigned installs.&rdquo;</p>
+          <cite>OWASP Agentic Skills Top&nbsp;10 &mdash; AST01, Malicious Skills</cite>
+        </blockquote>
+        <p style="margin-top:1.3rem">The Agent Skills spec &mdash; adopted by 40+ clients &mdash; defines <strong>no integrity or signing mechanism at all</strong>. That silence is the gap ContextLock fills. And because adaptive attacks bypass content-scanning defenses <strong>78&ndash;93%</strong> of the time, prevention beats detection here: ContextLock doesn&rsquo;t judge content, it makes tampering and impersonation detectable no matter how clever the payload.</p>
+      </div>
+      <div>
+        <div class="eyebrow" style="margin-bottom:0.9rem">The incident record &mdash; 2026</div>
+        <div class="ledger">
+          <div class="row">
+            <div class="yr">JAN&ndash;FEB</div>
+            <div class="ev"><b>ClawHavoc</b><span><span class="stat-big">341 malicious skills</span> on ClawHub (~11.9% of the registry). ~300k OpenClaw users exposed, delivering the AMOS macOS stealer.</span></div>
+          </div>
+          <div class="row">
+            <div class="yr">FEB&nbsp;05</div>
+            <div class="ev"><b>ToxicSkills &mdash; Snyk</b><span>Of 3,984 skills scanned, <span class="stat-big">36.8% carried a flaw</span>, 534 critical. 91% of confirmed-malicious skills used prompt injection.</span></div>
+          </div>
+          <div class="row">
+            <div class="yr">2025&ndash;26</div>
+            <div class="ev"><b>Config-file CVEs</b><span>CVE-2025-59536 &amp; CVE-2026-21852 &mdash; repo-controlled config files triggering command execution and credential theft.</span></div>
+          </div>
+          <div class="row">
+            <div class="yr">ONGOING</div>
+            <div class="ev"><b>Invisible Unicode injection</b><span>Unicode Tag characters (U+E0000&ndash;E007F) smuggled inside SKILL.md &mdash; invisible to a human reviewer, live to the model.</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HOW IT WORKS ============ -->
+<section class="band" id="how">
+  <div class="wrap">
+    <div class="band-head">
+      <span class="eyebrow"><span class="sec">SPEC &sect;6</span> &mdash; Mechanism</span>
+      <h2>Sign once. Verify on every load.</h2>
+      <p>Publishers seal a package into a signed manifest. Users pin the keys they trust. Every time a protected file loads, the engine re-checks the whole chain before a single byte reaches the model &mdash; then allows, warns, or blocks by policy.</p>
+    </div>
+
+    <div class="pipe">
+      <div class="lane">
+        <h3>Publisher &mdash; seal</h3>
+        <ol class="steps">
+          <li><span class="n">01</span><span><b>normalize</b> <em>&mdash; UTF-8 / LF / no-BOM, at sign time only</em></span></li>
+          <li><span class="n">02</span><span><b>lint</b> <em>&mdash; reject Unicode Tags, zero-width, bidi controls</em></span></li>
+          <li><span class="n">03</span><span><b>hash</b> <em>&mdash; SHA-256 + length over the exact bytes</em></span></li>
+          <li><span class="n">04</span><span><b>manifest</b> <em>&mdash; contextlock/2: version, expiry, files</em></span></li>
+          <li><span class="n">05</span><span><b>envelope</b> <em>&mdash; DSSE, Ed25519 over PAE &rarr; one artifact</em></span></li>
+        </ol>
+      </div>
+      <div class="lane">
+        <h3>User &mdash; verify</h3>
+        <ol class="steps">
+          <li><span class="n">01</span><span><b>discover</b> <em>&mdash; bounded envelope lookup, no walk-up</em></span></li>
+          <li><span class="n">02</span><span><b>signature</b> <em>&mdash; against pinned keys or rotatable root</em></span></li>
+          <li><span class="n">03</span><span><b>anti-rollback</b> <em>&mdash; version &ge; highest ever seen</em></span></li>
+          <li><span class="n">04</span><span><b>expiry</b> <em>&mdash; manifest must not be stale (freeze defense)</em></span></li>
+          <li><span class="n">05</span><span><b>hash + length</b> <em>&mdash; compare, then a verdict</em></span></li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="verdicts">
+      <div class="vcard ok">
+        <div class="st"><span aria-hidden="true">&#10003;</span> trusted</div>
+        <p>Signature valid, rollback &amp; expiry pass, hash matches.</p>
+        <div class="pol">policy &middot; allow</div>
+      </div>
+      <div class="vcard bad">
+        <div class="st"><span aria-hidden="true">&#10007;</span> modified</div>
+        <p>File content or length changed since it was signed or sealed.</p>
+        <div class="pol">policy &middot; block, block, audit</div>
+      </div>
+      <div class="vcard warn">
+        <div class="st"><span aria-hidden="true">?</span> untrusted</div>
+        <p>No envelope, unknown signer, or a file the manifest never listed.</p>
+        <div class="pol">policy &middot; block, warn, audit</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ GUARANTEES ============ -->
+<section class="band" id="guarantees">
+  <div class="wrap">
+    <div class="band-head">
+      <span class="eyebrow"><span class="sec">SPEC &sect;4</span> &mdash; Threat model</span>
+      <h2>What a signed manifest actually buys you.</h2>
+      <p>Each guarantee is a named threat with a concrete mechanism. Nothing here judges whether content is <em>safe</em> &mdash; only whether it is authentic and unchanged.</p>
+    </div>
+    <div class="spec">
+      <div class="srow head">
+        <div>ID</div><div class="threat">Threat</div><div class="mech">Mechanism</div>
+      </div>
+      <div class="srow"><div class="tid">T1</div><div class="threat">Local tampering after download or review</div><div class="mech">SHA-256 mismatch vs seal or signed manifest</div></div>
+      <div class="srow"><div class="tid">T2</div><div class="threat">Prompt-injection persistence &mdash; an agent editing its own instruction files</div><div class="mech">Seal / manifest mismatch on the next load; write-deny on protected paths</div></div>
+      <div class="srow"><div class="tid">T3</div><div class="threat">A malicious mirror or marketplace serving altered files</div><div class="mech">Signed manifest + publisher key pinning</div></div>
+      <div class="srow"><div class="tid">T5</div><div class="threat">Packages impersonating a known publisher</div><div class="mech">Explicit key / identity pinning &mdash; no trust from names or URLs</div></div>
+      <div class="srow"><div class="tid">T7</div><div class="threat">Rollback &mdash; replaying an older, vulnerable release</div><div class="mech">Monotonic <span class="nowrap">version</span> counter + local highest-seen state</div></div>
+      <div class="srow"><div class="tid">T8</div><div class="threat">Freeze &mdash; withholding updates indefinitely</div><div class="mech">Mandatory <span class="nowrap">expires_at</span> on every manifest</div></div>
+      <div class="srow"><div class="tid">T11</div><div class="threat">Invisible Unicode smuggling inside markdown</div><div class="mech">Exact-byte hashing + sign-time content lints</div></div>
+    </div>
+    <p class="disamb" style="color:var(--fg-muted)">The honest boundary: ContextLock hardens the distribution and persistence channels. A same-privilege attacker with code execution as you can re-seal local state &mdash; the managed tier moves that goalpost to admin privilege; beyond it is EDR territory, and the spec says so. Full model in <a href="https://github.com/mindmodelai/contextlock/blob/master/SPEC.md">SPEC &sect;4</a>.</p>
+  </div>
+</section>
+
+<!-- ============ TRUST MODELS ============ -->
+<section class="band" id="models">
+  <div class="wrap">
+    <div class="band-head">
+      <span class="eyebrow"><span class="sec">SPEC &sect;5</span> &mdash; Trust models</span>
+      <h2>From a solo author to a signing pipeline.</h2>
+      <p>Pick the ceremony that fits. All three produce the same three verdicts and compose freely.</p>
+    </div>
+    <div class="models">
+      <div class="model">
+        <span class="mno">Mode 0 &middot; TOFU</span>
+        <h3>Seal it yourself</h3>
+        <p>Reviewed a file you can&rsquo;t get signed &mdash; your own <span class="nowrap">~/.claude/CLAUDE.md</span>? Pin its bytes locally. Any later edit reads as <span style="color:var(--bad)">modified</span>. Zero publisher, zero keys.</p>
+        <div class="tag"><b>Defeats</b> T2 persistence on day one</div>
+      </div>
+      <div class="model">
+        <span class="mno">Profile A &middot; keys</span>
+        <h3>Signed manifests</h3>
+        <p>Publisher signs with a raw Ed25519 key; users pin the public key or a rotatable, revocable root. Works fully offline. A reviewer can countersign &mdash; demand a threshold of signers.</p>
+        <div class="tag"><b>For</b> solo authors &amp; teams</div>
+      </div>
+      <div class="model">
+        <span class="mno">Profile B &middot; keyless</span>
+        <h3>Sigstore in CI</h3>
+        <p>No key to hold. Sign in GitHub Actions; users pin the workflow&rsquo;s OIDC identity, exactly like npm provenance. Verification is fully offline against a pinned trusted root.</p>
+        <div class="tag"><b>For</b> published, audited packages</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ QUICK START ============ -->
+<section class="band" id="start">
+  <div class="wrap">
+    <div class="band-head">
+      <span class="eyebrow"><span class="sec">Usage</span> &mdash; Two commands to a verdict</span>
+      <h2>Verify what you install. Sign what you publish.</h2>
+    </div>
+    <div class="qs">
+      <div class="codeblock">
+        <div class="cbhead"><span>verify</span><span class="who">@contextlock/cli-user</span></div>
+        <pre><span class="c"># trust a publisher, then verify before use</span>
+<span class="pr">$</span> npm i -g @contextlock/cli-user
+<span class="pr">$</span> contextlock trust add "Acme Security" ./acme-public.key
+<span class="pr">$</span> contextlock verify ./skills/acme/SKILL.md
+  <span class="ok">&#10003; trusted</span> <span class="s">(publisher: Acme Security, key: cl-acme-2026)</span>
+
+<span class="c"># install a package: verify EVERYTHING, or write nothing</span>
+<span class="pr">$</span> contextlock install ./downloads/acme-skills \
+      --dest ./.claude/skills/acme</pre>
+      </div>
+      <div class="codeblock">
+        <div class="cbhead"><span>publish</span><span class="who">@contextlock/cli-publisher</span></div>
+        <pre><span class="c"># one command: keygen + manifest + DSSE signature</span>
+<span class="pr">$</span> npm i -g @contextlock/cli-publisher
+<span class="pr">$</span> contextlock-publisher protect ./my-package \
+      --sign --name "Acme Security" --version 1
+
+  <span class="s">generated key &middot; fingerprint c8e4b7d5&hellip;</span>
+  <span class="s">wrote contextlock.dsse.json &middot; 2 files sealed</span>
+
+<span class="c"># a reviewer can countersign the exact bytes</span>
+<span class="pr">$</span> contextlock-publisher countersign \
+      ./my-package/contextlock.dsse.json --key reviewer.key</pre>
+      </div>
+    </div>
+    <p class="disamb" style="color:var(--fg-muted);margin-top:1.4rem">Every <span style="font-family:var(--mono);font-size:0.92em">@contextlock/*</span> package publishes to npm with a provenance attestation. Full API, CI recipes and integration guides in the <a href="https://github.com/mindmodelai/contextlock#readme">README</a> and <a href="https://github.com/mindmodelai/contextlock/blob/master/SPEC.md">SPEC</a>.</p>
+  </div>
+</section>
+
+<!-- ============ ECOSYSTEM ============ -->
+<section class="band" id="ecosystem">
+  <div class="wrap">
+    <div class="band-head">
+      <span class="eyebrow"><span class="sec">Adapters</span> &mdash; Where it plugs in</span>
+      <h2>One verification engine, every place a file becomes a prompt.</h2>
+    </div>
+    <div class="eco">
+      <div class="cell"><b>Claude Code</b><span>Installable plugin: a PreToolUse hook verifies instruction files before context assembly.</span></div>
+      <div class="cell"><b>OpenClaw</b><span>Blocking install-gate and load middleware &mdash; the adapter written for the ClawHavoc threat.</span></div>
+      <div class="cell"><b>VS Code &amp; Copilot</b><span>Watch <span style="font-family:var(--mono);font-size:.85em">copilot-instructions.md</span>, Continue, Cody, Kiro steering files.</span></div>
+      <div class="cell"><b>MCP server</b><span>Expose <span style="font-family:var(--mono);font-size:.85em">verify_file</span> as a tool any MCP-capable assistant can call.</span></div>
+      <div class="cell"><b>GitHub Actions</b><span>Drop-in signing recipes for Profile A (key) and Profile B (keyless).</span></div>
+      <div class="cell"><b>nono interop</b><span>Consumes nono keyless skill attestations, with an explicit reduced-guarantee warning.</span></div>
+      <div class="cell soon"><b>Transparency log</b><span>Append-only inclusion proofs &mdash; design drafted in the repo.</span></div>
+      <div class="cell"><b>Bring your own</b><span>The core engine is a library. Any tool that reads local markdown can gate on a verdict.</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ HONESTY NOTE ============ -->
+<section class="band" id="honesty">
+  <div class="wrap">
+    <div class="honest">
+      <span class="eyebrow"><span class="sec">SPEC &sect;3</span> &mdash; What it is, and is not</span>
+      <p>Verified means <em>authentic and unmodified</em> &mdash; not safe. A trusted publisher can still publish harmful instructions. ContextLock establishes provenance, not content safety. It does the prevention half, deliberately, and composes with the scanning you already run.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FINAL CTA ============ -->
+<section class="band finale">
+  <div class="wrap">
+    <span class="eyebrow"><span class="sec">◆</span> Open source &middot; Apache-2.0</span>
+    <h2 style="margin-top:0.8rem">Give the files that program your agent a seal worth checking.</h2>
+    <div class="hero-cta">
+      <div class="cmd">
+        <span><span class="pfx">$</span> npm i -g @contextlock/cli-user</span>
+        <button data-copy="npm i -g @contextlock/cli-user">Copy</button>
+      </div>
+      <a class="btn primary" href="https://github.com/mindmodelai/contextlock">View on GitHub</a>
+      <a class="btn" href="https://github.com/mindmodelai/contextlock/blob/master/SPEC.md">Read the spec</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FOOTER ============ -->
+<footer class="colophon">
+  <div class="wrap">
+    <div class="colophon-grid">
+      <div>
+        <a class="brand" href="#top" style="margin-bottom:1rem">
+          <svg width="20" height="20" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.4" style="color:var(--brass)"><circle cx="16" cy="16" r="12"/><circle cx="16" cy="16" r="8.5"/></g><path d="M12.5 13h2.2v6h-2.2z M17.3 13h2.2v6h-2.2z" fill="var(--brass)"/></svg>
+          <span class="lo">[</span>context<b>lock</b><span class="lo">]</span>
+        </a>
+        <p class="meta">Cryptographic integrity &amp; provenance for AI instruction files.<br/>Ships as <b>@contextlock/*</b> on npm, provenance-attested.</p>
+      </div>
+      <div>
+        <h4>Project</h4>
+        <ul>
+          <li><a href="https://github.com/mindmodelai/contextlock">GitHub repository</a></li>
+          <li><a href="https://github.com/mindmodelai/contextlock/blob/master/SPEC.md">Specification v2</a></li>
+          <li><a href="https://github.com/mindmodelai/contextlock#readme">README &amp; API</a></li>
+          <li><a href="https://www.npmjs.com/org/contextlock">npm &mdash; @contextlock</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Reference</h4>
+        <ul>
+          <li><a href="#risk">The risk (SPEC &sect;2)</a></li>
+          <li><a href="#guarantees">Threat model (SPEC &sect;4)</a></li>
+          <li><a href="#start">Quick start</a></li>
+          <li><a href="https://github.com/mindmodelai/contextlock/blob/master/SECURITY.md">Security policy</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="disamb">Not affiliated with the unscoped npm package <span style="font-family:var(--mono)">contextlock</span> (a separate MCP tool by another author), nor with the 2025 &ldquo;Context Lock&rdquo; whitepaper. This project ships under the <span style="font-family:var(--mono)">@contextlock/*</span> scope and lives at contextlock.net.</p>
+    <div class="foot-bottom">
+      <span>&copy; 2026 Mind Model AI Inc. &middot; Apache-2.0</span>
+      <span>provenance, not safety &mdash; a signature proves authorship, not that content is benign</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---- theme toggle ---- */
+  var root = document.documentElement;
+  var btn = document.getElementById("theme");
+  try {
+    var saved = localStorage.getItem("cl-theme");
+    if (saved) root.setAttribute("data-theme", saved);
+  } catch (e) {}
+  function current() {
+    var t = root.getAttribute("data-theme");
+    if (t) return t;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  if (btn) btn.addEventListener("click", function () {
+    var next = current() === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try { localStorage.setItem("cl-theme", next); } catch (e) {}
+  });
+
+  /* ---- seal tick ring ---- */
+  var ticks = document.getElementById("ticks");
+  if (ticks) {
+    var svgns = "http://www.w3.org/2000/svg", out = "";
+    for (var i = 0; i < 72; i++) {
+      var a = (i / 72) * Math.PI * 2, r1 = 68, r2 = i % 6 === 0 ? 60 : 64;
+      var x1 = 100 + Math.cos(a) * r1, y1 = 100 + Math.sin(a) * r1;
+      var x2 = 100 + Math.cos(a) * r2, y2 = 100 + Math.sin(a) * r2;
+      out += "<line x1='" + x1.toFixed(1) + "' y1='" + y1.toFixed(1) + "' x2='" + x2.toFixed(1) + "' y2='" + y2.toFixed(1) + "'/>";
+    }
+    ticks.innerHTML = out;
+  }
+
+  /* ---- copy buttons ---- */
+  document.querySelectorAll("[data-copy]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var txt = b.getAttribute("data-copy");
+      var done = function () { var o = b.textContent; b.textContent = "Copied"; setTimeout(function () { b.textContent = o; }, 1400); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(done).catch(done);
+      } else { done(); }
+    });
+  });
+
+  /* ---- hero verification demo ---- */
+  var body = document.getElementById("termbody");
+  if (!body) return;
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // script of lines: [class, text, delayAfter]
+  var L = [
+    ["cmd-ln", "<span class='pr'>$</span> contextlock verify ./skills/code-review/SKILL.md", 380],
+    ["mut", "  resolving envelope … contextlock.dsse.json", 220],
+    ["key", "  signature   <span class='ok'>Ed25519 ok</span>  <span class='mut'>— cl-acme-2026</span>", 160],
+    ["key", "  publisher   Acme Security", 140],
+    ["key", "  rollback    <span class='ok'>v7 ≥ v7 ok</span>", 140],
+    ["key", "  expires     <span class='ok'>2027-07-14 ok</span>", 160],
+    ["key", "  sha-256     <span class='ok'>a3f5c9… match</span>", 260],
+    ["verdict-line", "<span class='verdict t-ok'>&#10003; trusted</span>", 900],
+    ["mut", "", 120],
+    ["warnc", "  // SKILL.md edited on disk — one line appended", 700],
+    ["cmd-ln", "<span class='pr'>$</span> contextlock verify ./skills/code-review/SKILL.md", 380],
+    ["mut", "  resolving envelope … contextlock.dsse.json", 200],
+    ["key", "  signature   <span class='ok'>Ed25519 ok</span>", 150],
+    ["key", "  sha-256     <span class='bad'>expected a3f5c9… got 7b2e1d…</span>", 260],
+    ["verdict-line", "<span class='verdict t-bad'>&#10007; modified — BLOCKED</span>", 0]
+  ];
+
+  function render(all) {
+    body.innerHTML = "";
+    L.forEach(function (item) {
+      if (item[1] === "" ) { body.innerHTML += "<span class='ln'>&nbsp;</span>"; return; }
+      var span = document.createElement("span");
+      span.className = "ln " + (item[0] === "verdict-line" ? "" : item[0]);
+      span.innerHTML = item[1];
+      body.appendChild(span);
+    });
+  }
+
+  if (reduce) { render(true); return; }
+
+  var idx = 0, cursor = null;
+  function step() {
+    if (idx >= L.length) { return; }
+    var item = L[idx++];
+    if (cursor && cursor.parentNode) cursor.parentNode.removeChild(cursor);
+    var span = document.createElement("span");
+    span.className = "ln " + (item[0] === "verdict-line" ? "" : item[0]);
+    span.innerHTML = item[1] === "" ? "&nbsp;" : item[1];
+    body.appendChild(span);
+    // trailing cursor
+    if (idx < L.length) {
+      cursor = document.createElement("span");
+      cursor.className = "ln"; cursor.innerHTML = "<span class='cursor'>_</span>";
+      body.appendChild(cursor);
+    }
+    setTimeout(step, item[2] + 40);
+  }
+
+  // start when hero is on screen, with a guaranteed fallback so the demo
+  // always runs even if IntersectionObserver never fires.
+  var started = false;
+  function begin() { if (started) return; started = true; setTimeout(step, 450); }
+  var term = document.getElementById("term");
+  if ("IntersectionObserver" in window && term) {
+    var io = new IntersectionObserver(function (ents) {
+      ents.forEach(function (e) { if (e.isIntersecting) { begin(); io.disconnect(); } });
+    }, { threshold: 0.25 });
+    io.observe(term);
+  }
+  setTimeout(begin, 1400); // safety net (hero is above the fold on load)
+})();
+</script>
+</body>
+</html>

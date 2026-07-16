@@ -1,0 +1,51 @@
+# Deploys the contextlock.net marketing site (the static `site/` directory)
+# to GitHub Pages. The site is a single self-contained index.html with no
+# build step, so this just uploads `site/` verbatim.
+#
+# Prerequisites (one-time, in repo Settings):
+#   1. Settings -> Pages -> Build and deployment -> Source = "GitHub Actions".
+#   2. Settings -> Pages -> Custom domain = contextlock.net
+#      (the `site/CNAME` file already pins this; setting it here provisions
+#      the managed TLS cert). Enable "Enforce HTTPS" once the cert is issued.
+#   3. Point DNS at GitHub Pages (see site/README.md for the exact records).
+#
+# Until Pages is enabled AND DNS resolves to GitHub, this workflow is inert:
+# it will build the artifact but the site is not reachable at the domain.
+
+name: deploy-site
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "site/**"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One in-flight deploy at a time; don't cancel a running one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upload site/ as the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
