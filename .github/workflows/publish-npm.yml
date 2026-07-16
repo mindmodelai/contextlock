@@ -1,0 +1,56 @@
+# Publishes the @contextlock/* packages to npm with provenance attestations
+# (dogfooding the keyless model Profile B is built on).
+#
+# Prerequisites (one-time):
+#   1. npmjs.com org "contextlock" exists and the token's user is a member.
+#   2. A granular automation token with publish rights on the @contextlock
+#      scope is stored as the NPM_TOKEN repository secret.
+#
+# Publishes in dependency order (core first). Safe to re-run: already-
+# published versions are skipped, not errored.
+
+name: publish-npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # REQUIRED for npm --provenance
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install and build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Test
+        run: npx vitest run
+
+      - name: Publish packages (dependency order, skip already-published)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -e
+          for pkg in core cli-publisher cli-user adapter-claude-code adapter-openclaw; do
+            name="@contextlock/$pkg"
+            version=$(node -p "require('./packages/$pkg/package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version already published - skipping"
+            else
+              (cd "packages/$pkg" && npm publish)
+              echo "published $name@$version"
+            fi
+          done

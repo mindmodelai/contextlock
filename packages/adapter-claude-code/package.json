@@ -17,5 +17,18 @@
     "@noble/ed25519": "^2.3.0",
     "@noble/hashes": "^1.7.2",
     "vitest": "^3.2.1"
-  }
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mindmodelai/contextlock.git",
+    "directory": "packages/adapter-claude-code"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "files": [
+    "dist"
+  ]
 }

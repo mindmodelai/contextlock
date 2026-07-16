@@ -30,5 +30,10 @@
     "@sigstore/bundle": "^4.0.0",
     "@sigstore/verify": "^3.1.1",
     "@sigstore/protobuf-specs": "^0.5.1"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mindmodelai/contextlock.git"
   }
 }

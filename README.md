@@ -1297,4 +1297,4 @@ Verified means authentic and unmodified — not necessarily safe. A trusted publ
 
 ## License
 
-See LICENSE file for details.
+Apache-2.0 — see [LICENSE](./LICENSE). Copyright 2026 Mind Model AI Inc.

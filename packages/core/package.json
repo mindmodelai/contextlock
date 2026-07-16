@@ -19,5 +19,19 @@
     "fast-check": "^4.1.1",
     "typescript": "^5.7.0",
     "vitest": "^3.2.1"
-  }
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mindmodelai/contextlock.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "files": [
+    "dist",
+    "assets"
+  ]
 }
