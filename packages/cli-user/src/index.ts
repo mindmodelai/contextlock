@@ -554,13 +554,15 @@ export async function runCli(argv: string[]): Promise<number> {
   }
 }
 
-// Auto-run only when this module is the executed entry (e.g. the `tcv-user`
-// bin -> dist/index.js). The `contextlock` bin imports runCli explicitly, so it
-// must NOT trigger this path (which would double-run).
+// Auto-run only when this module is the executed entry (node <path>/dist/
+// index.js), whether from the monorepo (packages/cli-user/...) or an npm
+// install (node_modules/@contextlock/cli-user/...). The `contextlock` bin
+// shim imports runCli explicitly and its own path (bin/contextlock.mjs) does
+// not match, so it never double-runs.
 const entry = (process.argv[1] ?? "").replace(/\\/g, "/");
 const isDirectRun =
-  entry.endsWith("packages/cli-user/dist/index.js") ||
-  entry.endsWith("packages/cli-user/src/index.ts");
+  entry.endsWith("cli-user/dist/index.js") ||
+  entry.endsWith("cli-user/src/index.ts");
 if (isDirectRun) {
   runCli(process.argv.slice(2))
     .then((code) => process.exit(code))

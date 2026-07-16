@@ -1,13 +1,12 @@
 {
   "name": "@contextlock/cli-user",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "User CLI for ContextLock TCV",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "contextlock": "./bin/contextlock.mjs",
-    "tcv-user": "dist/index.js"
+    "contextlock": "./bin/contextlock.mjs"
   },
   "scripts": {
     "build": "tsc",
@@ -35,6 +34,7 @@
     "provenance": true
   },
   "files": [
-    "dist"
+    "dist",
+    "bin"
   ]
 }
