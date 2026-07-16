@@ -1,6 +1,6 @@
 {
   "name": "@contextlock/cli-publisher",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Publisher CLI for ContextLock TCV",
   "type": "module",
   "main": "dist/index.js",
@@ -13,7 +13,7 @@
     "test": "vitest --run"
   },
   "dependencies": {
-    "@contextlock/core": "workspace:*",
+    "@contextlock/core": "^0.1.0",
     "@noble/ed25519": "^2.3.0",
     "@noble/hashes": "^1.7.2"
   },

@@ -8,7 +8,7 @@
     "test": "vitest --run hook.test"
   },
   "dependencies": {
-    "@contextlock/cli-user": "workspace:*"
+    "@contextlock/cli-user": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

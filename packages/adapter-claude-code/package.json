@@ -1,6 +1,6 @@
 {
   "name": "@contextlock/adapter-claude-code",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Claude Code adapter for ContextLock TCV",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,7 +9,7 @@
     "test": "vitest --run"
   },
   "dependencies": {
-    "@contextlock/core": "workspace:*"
+    "@contextlock/core": "^0.1.0"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
