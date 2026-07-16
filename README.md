@@ -12,6 +12,13 @@
 
 ContextLock is a cryptographic verification system that protects AI coding tools from tampered instruction files. It verifies the authenticity and integrity of markdown artifacts — SKILL.md, CLAUDE.md, RULES.md, prompt packs, policy files — before they influence model behavior.
 
+> **Name disambiguation:** this project is unrelated to the unscoped npm
+> package [`contextlock`](https://www.npmjs.com/package/contextlock) (an MCP
+> safety layer by a different author, published 2026-07-13). This project's
+> packages ship under the **`@contextlock/*`** scope, and its home is
+> **contextlock.net**. It also predates our awareness of the 2025 "Context
+> Lock" whitepaper by Zero2One; no affiliation.
+
 Publishers sign manifests with Ed25519 keys. Users pin trusted public keys (or a rotatable publisher root). When an AI tool loads a protected file, ContextLock checks the signature chain, anti-rollback state, and file hash, then allows, warns, or blocks based on configurable policy. Users can also seal files they reviewed themselves (Mode 0, trust-on-first-use) with zero publisher involvement.
 
 ## How It Works
