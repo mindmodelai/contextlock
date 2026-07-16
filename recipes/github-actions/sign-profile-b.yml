@@ -15,10 +15,14 @@
 # into a DSSE envelope with ContextLock's exact payloadType and emits the
 # Sigstore bundle as contextlock.sigstore.json - the Profile B evidence file.
 #
-# NOT YET CI-VALIDATED: this recipe has been reviewed against the sigstore-js
-# API but not executed in a live workflow (signing needs real OIDC). Validate
-# once before adopting; verification of the produced bundle is covered by
-# ContextLock's test suite.
+# CI-VALIDATED 2026-07-15: executed in a live GitHub Actions workflow (real
+# OIDC -> Fulcio -> Rekor); the produced bundle verifies offline at full
+# default thresholds against ContextLock's shipped trusted root. The captured
+# bundle is a permanent test fixture (tests/fixtures/sigstore/ci-real-pkg).
+#
+# PRIVACY NOTE: keyless signing writes your repo/workflow identity into the
+# PUBLIC, append-only Rekor transparency log. Do not run this from a private
+# repo whose name you are not ready to disclose.
 
 name: ContextLock sign (Profile B, keyless)
 

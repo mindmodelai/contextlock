@@ -343,7 +343,9 @@ Research verdict: **CONFLICTED, mitigated by owned assets.**
 - Domains: **Mind Model AI owns contextlock.net** (project home). contextlock.dev/.io/.ai/.com are taken or parked by others; contextlock.org appeared unregistered at research time.
 - Security audiences may hear a ransomware echo in "-Lock" (ESET's "PromptLock", Aug 2025).
 
-Working decision: **keep the name**, anchored on contextlock.net and `@contextlock/*` scoped npm packages, with a disambiguation note in the README (this project is not the unscoped npm `contextlock` MCP tool, and predates awareness of the Zero2One whitepaper). Remaining prerequisites before public launch: trademark search (USPTO/CIPO), and consider also registering contextlock.org defensively.
+Working decision: **keep the name**, anchored on contextlock.net and `@contextlock/*` scoped npm packages, with a disambiguation note in the README (this project is not the unscoped npm `contextlock` MCP tool, and predates awareness of the Zero2One whitepaper).
+
+Resolved 2026-07-15: **no trademark** - this ships as an open-source project; the README disambiguation note is the mitigation for name collisions. (Residual, accepted: a search would also have surfaced third-party marks the name might step on; the Zero2One whitepaper claim is prior use of the phrase, not a registration, and the collision risk is carried knowingly.) Still worth doing before launch: register contextlock.org defensively (cheap; the repo directory already uses the name).
 
 ## 13. Migration map: v2 spec vs the implemented v1 code
 
@@ -397,7 +399,7 @@ Carried forward, now with owners in the process rather than rhetorical status:
 4. Quarantine UX: move-aside + placeholder vs rename-in-place - Phase A usability test.
 5. Seal-store scaling (JSON vs SQLite) once seals exceed ~10^3 files - defer until real.
 6. Phase C follow-ups (2026-07-15): live-gateway verification of the OpenClaw hook payloads and installPolicy schema; CI execution of the Profile B keyless recipe; OpenClaw plugin packaging + distribution (bootstrap question, 7.3 applies); trusted-root update cadence for the shipped Sigstore root (currently a pinned snapshot - releases must refresh it, and a TUF-updater integration is the honest long-term fix, pairs with the 6.4 transparency-log work).
-7. Phase D follow-ups (2026-07-15): SUBMISSION of the drafted proposals and the nono alignment conversation - all gated on going public (section 12: trademark search still open). Golden vector from a real nono CI run (mock-CA fixture cannot cover their exact Rekor serialization). nono-native emission target + optional P-256 signing (keyed interop prerequisite) as Phase E candidates. Engine tier for reduced-guarantee in-toto evidence (an `attested`-class status distinct from `trusted`) - decide only on real demand. Transparency-log implementation per `docs/transparency-log-exploration.md` (Phase E candidate).
+7. Phase D follow-ups (2026-07-15): SUBMISSION of the drafted proposals and the nono alignment conversation - all gated on going public (section 12; the trademark prerequisite was dropped 2026-07-15, so the remaining gates are Sam's go decision plus launch hygiene: LICENSE file, npm workspace fix, scoped-package publishing). ~~Golden vector from a real nono CI run~~ and ~~CI execution of the keyless recipe~~ both DONE 2026-07-15 via a private validation repo (real Fulcio/Rekor artifacts vendored as fixtures, `packages/core/src/ci-golden.test.ts`; note: keyless signing publishes the signing repo's identity to the public Rekor log - the validation deliberately ran from a neutrally-named repo). nono-native emission target + optional P-256 signing (keyed interop prerequisite) as Phase E candidates. Engine tier for reduced-guarantee in-toto evidence (an `attested`-class status distinct from `trusted`) - decide only on real demand. Transparency-log implementation per `docs/transparency-log-exploration.md` (Phase E candidate).
 
 ---
 

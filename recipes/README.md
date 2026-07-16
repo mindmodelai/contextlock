@@ -50,7 +50,13 @@ Signing recipes for publishing verified instruction-file packages from CI
   substitute `cosign attest-blob` (wraps payloads in an in-toto Statement) or
   `cosign sign-blob` (message signature, not DSSE) - ContextLock rejects both
   by design.
-- **Status: not yet CI-validated.** The recipe follows the sigstore-js API
-  but has not been executed in a live workflow (signing needs real OIDC).
-  ContextLock's verification of the resulting bundle format IS covered by the
-  test suite (real npm-provenance fixture + synthetic mock-CA fixture).
+- **Status: CI-validated 2026-07-15.** Executed in a live GitHub Actions
+  workflow; the produced bundle verifies offline at full default thresholds
+  (real Rekor entry + SCT) against the shipped trusted root, and is vendored
+  as a permanent golden-vector fixture
+  (`tests/fixtures/sigstore/ci-real-pkg`, tests in
+  `packages/core/src/ci-golden.test.ts`).
+- **Privacy note:** keyless signing writes the signing repo/workflow identity
+  into the PUBLIC, append-only Rekor log. Running the recipe from a private
+  repo discloses that repo's name permanently - validate from a neutral repo
+  if the project is not public yet.

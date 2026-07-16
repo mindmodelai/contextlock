@@ -98,14 +98,22 @@ tests now exist, and the decision is **reaffirmed**:
 
 ## 5. Follow-ups
 
-1. Capture a **golden vector from a real nono run** (`agent-sign` action or
-   `nono trust sign --keyless` in CI) to guard against drift our
-   mock-CA fixture can't see (exact Rekor `tlogEntries` serialization is
-   delegated to their sigstore crates and remains unverified).
+1. ~~Capture a golden vector from a real nono run~~ **Done 2026-07-15**: ran
+   `nolabs-ai/agent-sign@v0.1.0` in a live GitHub Actions workflow; the
+   resulting bundle (real Fulcio cert + Rekor entry) is vendored at
+   `tests/fixtures/sigstore/nono-real-pkg/.nono-trust.bundle` and verifies
+   through `verifyNonoBundle` at FULL default thresholds
+   (`packages/core/src/ci-golden.test.ts`). The wire shape matched this
+   document exactly. Bonus finding for the alignment conversation: agent-sign
+   v0.1.0's artifact-upload path is broken for its own default output - the
+   `./**/*.bundle` glob misses the hidden `.nono-trust.bundle` file
+   ("No files were found with the provided path"), so `upload-artifacts:
+   true` uploads nothing in multi-subject mode; only the commit path works.
+   Worth reporting upstream when going public.
 2. Track nono's pre-1.0 churn before investing in emission: predicate/policy
    fields moved as recently as 0.66.0, and the org renamed twice.
 3. The alignment conversation with the nono project (sharing this mapping,
-   raising the pluggable-predicateType idea) is a go-public act - same gate
-   as the proposals in `docs/proposals/`.
+   the pluggable-predicateType idea, and the agent-sign bug above) is a
+   go-public act - same gate as the proposals in `docs/proposals/`.
 4. Decide the engine-tier question (an explicit reduced-guarantee status)
    only if/when users actually hold nono-attested skills.
