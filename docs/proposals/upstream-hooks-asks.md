@@ -1,9 +1,12 @@
 # Upstream asks: verification hooks in host tools
 
-**Status: DRAFT - NOT FILED.** Ready-to-adapt issue text for upstream
-conversations (SPEC v2 Phase D). Filing these is a go-public act: it reveals
-the project and its design. Do not file before the naming/trademark
-prerequisites (SPEC 12) are closed and Sam signs off.
+**Status: FILED 2026-07-16** (adapted from these drafts with live links):
+- Ask 1 (Claude Code PreContextLoad): https://github.com/anthropics/claude-code/issues/77988
+- Ask 2 (Claude Code install verification / signed plugins): https://github.com/anthropics/claude-code/issues/77989
+- Ask 3 (OpenClaw injection gate): https://github.com/openclaw/openclaw/issues/108581
+- Ask 4 (OpenClaw managed tier): https://github.com/openclaw/openclaw/issues/108582
+- nono alignment discussion: https://github.com/nolabs-ai/nono/discussions/1422
+- agent-sign bug report: https://github.com/nolabs-ai/agent-sign/issues/4
 
 Each ask is grounded in the empirical surface docs
 (`claude-code-surface.md`, `openclaw-surface.md`) - the asks are precisely

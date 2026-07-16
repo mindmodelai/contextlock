@@ -112,8 +112,9 @@ tests now exist, and the decision is **reaffirmed**:
    Worth reporting upstream when going public.
 2. Track nono's pre-1.0 churn before investing in emission: predicate/policy
    fields moved as recently as 0.66.0, and the org renamed twice.
-3. The alignment conversation with the nono project (sharing this mapping,
-   the pluggable-predicateType idea, and the agent-sign bug above) is a
-   go-public act - same gate as the proposals in `docs/proposals/`.
+3. ~~The alignment conversation with the nono project~~ **Opened 2026-07-16**:
+   https://github.com/nolabs-ai/nono/discussions/1422 (mapping + pluggable
+   predicateType + keyed-algorithm question); bug filed at
+   https://github.com/nolabs-ai/agent-sign/issues/4.
 4. Decide the engine-tier question (an explicit reduced-guarantee status)
    only if/when users actually hold nono-attested skills.

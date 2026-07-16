@@ -1,10 +1,12 @@
 # Agent Skills integrity extension - proposal draft
 
-**Status: DRAFT - NOT SUBMITTED.** Submitting is a go-public act; blocked on
-the naming/trademark prerequisites (SPEC 12) and Sam's sign-off. Research
-basis: agentskills.io spec + repo ground truth, 2026-07-15 (44 adopting
+**Status: SUBMITTED 2026-07-16.**
+Posted into discussion #393: https://github.com/agentskills/agentskills/discussions/393#discussioncomment-17656138
+Companion comment on PR #254: https://github.com/agentskills/agentskills/pull/254#issuecomment-4987831141
+(The submitted text was this draft adapted with live repo/npm links. Research
+basis: agentskills.io spec + repo ground truth, 2026-07-15 - 44 adopting
 clients; spec silent on integrity; three prior integrity RFCs closed or
-converted to discussions).
+converted to discussions.)
 
 ## How to submit (this matters more than the content)
 
